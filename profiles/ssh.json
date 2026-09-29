@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "name": "ssh",
+  "description": "Hardened public-key-only SSH baseline",
+  "installable": true,
+  "components": ["ssh"]
+}

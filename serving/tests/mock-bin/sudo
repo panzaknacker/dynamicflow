@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+-n)
+    shift
+    ;;
+-v)
+    exit 0
+    ;;
+esac
+
+"$@"

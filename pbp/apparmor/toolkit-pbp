@@ -1,0 +1,9 @@
+abi <abi/4.0>,
+
+include <tunables/global>
+
+profile toolkit-pbp /opt/toolkit/pbp/releases/*/browser/camoufox-bin flags=(unconfined) {
+  userns,
+
+  include if exists <local/toolkit-pbp>
+}

@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    echo 'Usage: toolkit-gui [USER@]VM-IP' >&2
+    exit 2
+fi
+
+case "$1" in
+*@*) target="$1" ;;
+*) target="ubuntu@$1" ;;
+esac
+project_root="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+ssh_root="${TOOLKIT_SSH_DIR:-$project_root/ssh}"
+connect_gui="$ssh_root/connect-gui.sh"
+identity="${HOME}/.ssh/id_ed25519"
+known_hosts="${HOME}/.ssh/known_hosts"
+
+[ -x "$connect_gui" ] || {
+    echo "ERROR: Missing GUI tunnel helper: $connect_gui" >&2
+    exit 1
+}
+[ -f "$identity" ] || {
+    echo "ERROR: Missing SSH private key: $identity" >&2
+    exit 1
+}
+[ -f "$known_hosts" ] || {
+    echo "ERROR: Missing SSH known_hosts file: $known_hosts" >&2
+    exit 1
+}
+
+exec "$connect_gui" \
+    --identity "$identity" \
+    --known-hosts "$known_hosts" \
+    "$target"

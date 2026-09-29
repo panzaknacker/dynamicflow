@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+deadline_file=/var/lib/toolkit-expiry/deadline.epoch
+[[ -f "$deadline_file" && ! -L "$deadline_file" ]] || exit 1
+deadline="$(tr -d '[:space:]' <"$deadline_file")"
+[[ "$deadline" =~ ^[0-9]+$ ]] || exit 1
+now="$(date -u '+%s')"
+((now < deadline)) && exit 0
+logger -p authpriv.warning -t toolkit-expiry 'Toolkit maximum host lifetime reached; powering off.'
+systemctl poweroff

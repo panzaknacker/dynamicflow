@@ -1,0 +1,47 @@
+title = "Dynamicflow secret-scanning policy"
+minVersion = "v8.25.0"
+
+[extend]
+useDefault = true
+
+# exceptions require the named rule, an exact reviewed path AND a bounded
+# synthetic value or signature match. other findings in these files still fail.
+
+[[allowlists]]
+description = "Published Caddy repository signing-key fingerprint"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = [
+  '''(^|/)serving/setup-caddy-mfa\.sh$''',
+  '''(^|/)serving/tests/mfa-static-checks\.sh$''',
+]
+regexes = [
+  '''^65760C51EDEA2017CEA2CA15155B6D79CA56EA34$''',
+]
+
+[[allowlists]]
+description = "Published Mullvad repository signing-key fingerprint"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = [
+  '''(^|/)vpn/bootstrap-vpn\.sh$''',
+  '''(^|/)vpn/tests/static-checks\.sh$''',
+]
+regexes = [
+  '''^A1198702FC3E0A09A9AE5B75D5A1D4F266DE8DDF$''',
+]
+
+[[allowlists]]
+description = "RFC OTP test seed; not an operator secret"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = [
+  '''(^|/)serving/tests/test_toolkit_auth\.py$''',
+]
+regexes = [
+  '''^GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ$''',
+]
+

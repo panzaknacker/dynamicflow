@@ -1,0 +1,17 @@
+# key value
+browser_version 150.0.2-beta.25
+browser_major 150
+browser_release_tag v0.1.8-dev.5
+browser_release_repo VulpineOS/VulpineOS
+browser_amd64_name camoufox-150.0.2-beta.25-lin.x86_64.zip
+browser_amd64_url https://github.com/VulpineOS/VulpineOS/releases/download/v0.1.8-dev.5/camoufox-150.0.2-beta.25-lin.x86_64.zip
+browser_amd64_sha256 dbd5dcffb2aead79f55ed305adb8e67e923094fc6f4181781bf55330f75d2a48
+browser_arm64_name camoufox-150.0.2-beta.25-lin.arm64.zip
+browser_arm64_url https://github.com/VulpineOS/VulpineOS/releases/download/v0.1.8-dev.5/camoufox-150.0.2-beta.25-lin.arm64.zip
+browser_arm64_sha256 9d541d991e297c44d93d6a10bd6dfef8efca7d50f3cd5468c3ac11056a569b6a
+camoufox_package cloverlabs-camoufox==0.6.0
+camoufox_wheel_sha256 9f7d26eb4e4f494bcd0f8bf043d5932cba11f7bd82c2795d595f5ff602a87744
+ublock_version 1.72.2
+ublock_name ublock_origin-1.72.2.xpi
+ublock_url https://addons.mozilla.org/firefox/downloads/file/4888680/ublock_origin-1.72.2.xpi
+ublock_sha256 40c315b0da7871868155ecfae7a50a58dfa0920aebd865e008214986f1b7c578

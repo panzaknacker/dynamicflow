@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "review": {
+    "observed_at": "2026-07-27T00:00:00Z",
+    "expires_at": "2026-08-03T00:00:00Z",
+    "disposition": "blocked",
+    "reason": "No reviewed Camoufox build includes the current Firefox 153 security baseline."
+  },
+  "security_gate": {
+    "maximum_review_window_days": 8,
+    "minimum_gecko_version": "153.0",
+    "require_approved_disposition": true,
+    "require_exact_release_provenance": true
+  },
+  "mozilla": {
+    "channel": "release",
+    "latest_version": "153.0",
+    "last_release_date": "2026-07-21",
+    "product_details_url": "https://product-details.mozilla.org/1.0/firefox_versions.json",
+    "security_advisory_url": "https://www.mozilla.org/en-US/security/advisories/mfsa2026-68/"
+  },
+  "locked_release": {
+    "repository": "VulpineOS/VulpineOS",
+    "tag": "v0.1.8-dev.5",
+    "tag_commit": "583c5317a0461d69e280deb12fbb1590e02631ec",
+    "commit_signature_verified": false,
+    "release_published_at": "2026-06-08T14:23:33Z",
+    "release_immutable": false,
+    "browser_version": "150.0.2-beta.25",
+    "assets": {
+      "amd64": {
+        "name": "camoufox-150.0.2-beta.25-lin.x86_64.zip",
+        "url": "https://github.com/VulpineOS/VulpineOS/releases/download/v0.1.8-dev.5/camoufox-150.0.2-beta.25-lin.x86_64.zip",
+        "sha256": "dbd5dcffb2aead79f55ed305adb8e67e923094fc6f4181781bf55330f75d2a48"
+      },
+      "arm64": {
+        "name": "camoufox-150.0.2-beta.25-lin.arm64.zip",
+        "url": "https://github.com/VulpineOS/VulpineOS/releases/download/v0.1.8-dev.5/camoufox-150.0.2-beta.25-lin.arm64.zip",
+        "sha256": "9d541d991e297c44d93d6a10bd6dfef8efca7d50f3cd5468c3ac11056a569b6a"
+      }
+    }
+  },
+  "python_wrapper": {
+    "project": "cloverlabs-camoufox",
+    "version": "0.6.0",
+    "wheel": "cloverlabs_camoufox-0.6.0-py3-none-any.whl",
+    "wheel_sha256": "9f7d26eb4e4f494bcd0f8bf043d5932cba11f7bd82c2795d595f5ff602a87744",
+    "pypi_json_url": "https://pypi.org/pypi/cloverlabs-camoufox/json"
+  },
+  "latest_reviewed_checkpoint": {
+    "repository": "daijro/camoufox",
+    "tag": "v152.0.4-beta.28",
+    "tag_commit": "0583c3ec94f5a9df5cb2d09553fbfe80589b6e2d",
+    "commit_signature_verified": false,
+    "release_published_at": "2026-07-19T07:20:26Z",
+    "release_immutable": false,
+    "browser_version": "152.0.4-beta.28",
+    "assets": {
+      "amd64": {
+        "name": "camoufox-152.0.4-beta.28-lin.x86_64.zip",
+        "url": "https://github.com/daijro/camoufox/releases/download/v152.0.4-beta.28/camoufox-152.0.4-beta.28-lin.x86_64.zip",
+        "sha256": "924f3109ccd6d47cd6a0384d67a345fadf975d48b6319f8dbbd5954c588982bd"
+      },
+      "arm64": {
+        "name": "camoufox-152.0.4-beta.28-lin.arm64.zip",
+        "url": "https://github.com/daijro/camoufox/releases/download/v152.0.4-beta.28/camoufox-152.0.4-beta.28-lin.arm64.zip",
+        "sha256": "3a105a2fc929e80a79b4b7fce2c93ed62c4fb2c877f3c1ed2a5d66a1c4fe968f"
+      }
+    }
+  }
+}

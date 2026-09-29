@@ -1,0 +1,2553 @@
+#!/usr/bin/python3 -I
+"""interactive, fail-closed PBP GUI connection helper."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import binascii
+import hashlib
+import hmac
+import ipaddress
+import json
+import os
+import re
+import secrets
+import shlex
+import shutil
+import signal
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import NoReturn, Sequence
+
+
+WHITELIST_SCHEMA = "dynamicflow/pbp-m-whitelist/v1"
+DEFAULT_SSH_USER = "ubuntu"
+DEFAULT_SSH_PORT = 22
+DEFAULT_LOCAL_PORT = 5901
+DEFAULT_WHITELIST_TTL = 14_400
+MAX_HELPER_OUTPUT = 4096
+MAX_KNOWN_HOSTS_SIZE = 1_048_576
+HELPER_ACQUIRE_TIMEOUT = 45
+HELPER_RELEASE_TIMEOUT = 20
+CONNECTOR_SIGNAL_GRACE = 5.0
+SAFE_SYSTEM_PATH = "/usr/bin:/bin"
+HOSTKEY_SCAN_TIMEOUT = 15
+SSH_CONNECT_TIMEOUT = 15
+REMOTE_PREFLIGHT_TIMEOUT = 330
+REMOTE_VERIFY_TIMEOUT = 90
+MAX_REMOTE_OUTPUT = 16_384
+MAX_ARCHIVE_SIZE = 2 * 1024 * 1024 * 1024
+PERSONA_CLASSES = ("basic", "performance", "workstation")
+PERSONA_DESCRIPTIONS = (
+    "basic – 4 CPU-Threads, Intel HD 400, 1600x900",
+    "performance – 8 CPU-Threads, NVIDIA GTX 980, 1600x900",
+    "workstation – 12 CPU-Threads, Intel HD, 1600x900",
+)
+HOSTKEY_FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
+REMOTE_STAGE_RE = re.compile(r"^/tmp/dynamicflow-pbp-[a-f0-9]{24}$")
+
+SSH_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+LEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+SSH_PATH_RE = re.compile(r"^/[-A-Za-z0-9._/@:+,=]+$")
+PRIVATE_KEY_BEGIN = b"-----BEGIN "
+PRIVATE_KEY_HEADERS = tuple(
+    PRIVATE_KEY_BEGIN + key_type + b"PRIVATE KEY-----"
+    for key_type in (b"OPENSSH ", b"", b"ENCRYPTED ", b"RSA ", b"EC ", b"DSA ")
+)
+
+
+class UserError(Exception):
+    """expected, user-facing failure."""
+
+
+class SetupInterrupted(Exception):
+    """signal received after the operator confirmed the cloud firewall."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(f"Setup durch Signal {signum} abgebrochen.")
+        self.signum = signum
+
+
+@dataclass(frozen=True)
+class Target:
+    user: str
+    host: str
+
+    @property
+    def ssh_destination(self) -> str:
+        return f"{self.user}@{self.host}"
+
+
+@dataclass(frozen=True)
+class Lease:
+    lease_id: str
+    host: str
+    source_cidr: str
+    ssh_port: int
+
+
+@dataclass(frozen=True)
+class BrowserBuildMode:
+    disposable_test: bool
+
+    @property
+    def package_root(self) -> str:
+        return "toolkit-pbp-disposable-test" if self.disposable_test else "toolkit-pbp"
+
+
+@dataclass(frozen=True)
+class ProvisionArtifacts:
+    ssh_archive: Path
+    pbp_archive: Path
+    ssh_sha256: str
+    pbp_sha256: str
+
+
+@dataclass
+class SSHControlMaster:
+    ssh: Path
+    common_arguments: list[str]
+    destination: str
+    socket_path: Path
+    process: subprocess.Popen[bytes]
+    temporary: tempfile.TemporaryDirectory[str]
+
+
+class SignalCoordinator:
+    """record termination requests, forward them, and let cleanup finish."""
+
+    def __init__(self) -> None:
+        self.received: int | None = None
+        self.connector: subprocess.Popen[bytes] | None = None
+        self._previous: dict[int, signal.Handlers] = {}
+
+    @staticmethod
+    def supported_signals() -> tuple[int, ...]:
+        names = ("SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT")
+        return tuple(getattr(signal, name) for name in names if hasattr(signal, name))
+
+    def install(self) -> None:
+        for signum in self.supported_signals():
+            self._previous[signum] = signal.getsignal(signum)
+            signal.signal(signum, self._handle)
+
+    def restore(self) -> None:
+        for signum, previous in self._previous.items():
+            signal.signal(signum, previous)
+        self._previous.clear()
+
+    def _handle(self, signum: int, _frame: object) -> None:
+        if self.received is None:
+            self.received = signum
+        connector = self.connector
+        if connector is not None and connector.poll() is None:
+            try:
+                connector.send_signal(signum)
+            except OSError:
+                pass
+
+    @property
+    def exit_code(self) -> int:
+        return 128 + (self.received or 0)
+
+
+class SetupSignalGuard:
+    """interrupt work promptly, then defer further signals until cleanup ends."""
+
+    def __init__(self) -> None:
+        self.received: int | None = None
+        self.cleaning = False
+        self._previous: dict[int, signal.Handlers] = {}
+
+    def install(self) -> None:
+        for signum in SignalCoordinator.supported_signals():
+            self._previous[signum] = signal.getsignal(signum)
+            signal.signal(signum, self._handle)
+
+    def begin_cleanup(self) -> None:
+        self.cleaning = True
+
+    def restore(self) -> None:
+        for signum, previous in self._previous.items():
+            signal.signal(signum, previous)
+        self._previous.clear()
+
+    def _handle(self, signum: int, _frame: object) -> None:
+        if self.received is None:
+            self.received = signum
+        if not self.cleaning:
+            raise SetupInterrupted(signum)
+
+
+def write_stderr(message: str) -> None:
+    try:
+        print(message, file=sys.stderr)
+    except (OSError, ValueError):
+        try:
+            try:
+                stderr_descriptor = sys.stderr.fileno()
+            except (AttributeError, OSError, ValueError):
+                stderr_descriptor = 2
+            descriptor = os.open(os.devnull, os.O_WRONLY | getattr(os, "O_CLOEXEC", 0))
+            if descriptor != stderr_descriptor:
+                try:
+                    os.dup2(descriptor, stderr_descriptor)
+                finally:
+                    os.close(descriptor)
+        except (OSError, ValueError):
+            pass
+
+
+def progress_step(current: int, total: int, title: str) -> None:
+    if current < 1 or total < current:
+        raise UserError("Interner Fortschrittszähler ist ungültig.")
+    write_stderr(f"\n[{current}/{total}] {title}")
+
+
+def human_size(byte_count: int) -> str:
+    if byte_count < 0:
+        raise UserError("Interne Dateigröße ist ungültig.")
+    size = float(byte_count)
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    for index, unit in enumerate(units):
+        if size < 1024 or index == len(units) - 1:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    raise UserError("Interne Größenformatierung schlug fehl.")
+
+
+def path_size(path: Path, label: str) -> str:
+    try:
+        return human_size(path.stat().st_size)
+    except OSError as exc:
+        raise UserError(f"Größe von {label} konnte nicht gelesen werden.") from exc
+
+
+def fail(message: str, exit_code: int = 1) -> NoReturn:
+    write_stderr(f"FEHLER: {message}")
+    raise SystemExit(exit_code)
+
+
+def validate_port(value: str) -> int:
+    try:
+        port = int(value, 10)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Port muss eine Zahl sein.") from exc
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("Port muss zwischen 1 und 65535 liegen.")
+    return port
+
+
+def validate_ttl(value: str) -> int:
+    try:
+        ttl = int(value, 10)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("TTL muss eine Zahl sein.") from exc
+    if not 300 <= ttl <= 86_400:
+        raise argparse.ArgumentTypeError("TTL muss zwischen 300 und 86400 Sekunden liegen.")
+    return ttl
+
+
+def normalize_host(raw_host: str) -> str:
+    host = raw_host
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not host or len(host) > 253 or any(character.isspace() for character in host):
+        raise UserError("Zielhost ist leer, zu lang oder enthält Leerraum.")
+    if host.startswith("-") or "/" in host or "\\" in host or "\x00" in host:
+        raise UserError("Zielhost enthält unzulässige Zeichen.")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise UserError("Ziel muss eine literale, global routbare öffentliche IP-Adresse sein.") from exc
+    if address.version != 4:
+        raise UserError(
+            "PBP deaktiviert IPv6 systemweit; Ziel muss eine global routbare öffentliche IPv4-Adresse sein."
+        )
+    if (
+        not address.is_global
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_loopback
+        or address.is_link_local
+        or getattr(address, "scope_id", None) is not None
+        or getattr(address, "ipv4_mapped", None) is not None
+    ):
+        raise UserError("Ziel muss eine literale, global routbare öffentliche IP-Adresse sein.")
+    return address.compressed
+
+
+def normalize_target(raw_target: str, default_user: str) -> Target:
+    target = raw_target.strip()
+    if not target or target.startswith("-") or target.count("@") > 1:
+        raise UserError("Ziel muss IP oder USER@IP sein.")
+    if "@" in target:
+        user, raw_host = target.split("@", 1)
+    else:
+        user, raw_host = default_user, target
+    if not SSH_USER_RE.fullmatch(user) or user == "root":
+        raise UserError("SSH-Benutzer ist ungültig; Root-Login ist nicht erlaubt.")
+    return Target(user=user, host=normalize_host(raw_host))
+
+
+def normalize_source_ip(raw_source: str) -> str:
+    source = raw_source.strip()
+    if not source or any(character.isspace() for character in source):
+        raise UserError("Access-IP ist leer oder enthält Leerraum.")
+    try:
+        if "/" in source:
+            interface = ipaddress.ip_interface(source)
+            address = interface.ip
+            if interface.network.prefixlen != address.max_prefixlen:
+                raise UserError("Die SSH-Allowlist akzeptiert nur genau eine IPv4-Adresse (/32), kein breites Netz.")
+        else:
+            address = ipaddress.ip_address(source)
+    except ValueError as exc:
+        raise UserError("Access-IP ist keine gültige IPv4-Adresse.") from exc
+    if address.version != 4:
+        raise UserError("PBP deaktiviert IPv6 systemweit; Access-IP muss eine global routbare IPv4-Adresse (/32) sein.")
+    if (
+        not address.is_global
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_loopback
+        or address.is_link_local
+        or getattr(address, "scope_id", None) is not None
+        or getattr(address, "ipv4_mapped", None) is not None
+    ):
+        raise UserError("Access-IP muss eine global routbare, öffentliche IPv4-Adresse sein.")
+    return f"{address.compressed}/32"
+
+
+def prompt(message: str) -> str:
+    try:
+        return input(message)
+    except (EOFError, KeyboardInterrupt) as exc:
+        raise UserError("Interaktive Eingabe wurde abgebrochen.") from exc
+
+
+def prompt_tty(message: str) -> str:
+    """read security attestations only from the controlling terminal."""
+
+    descriptor: int | None = None
+    try:
+        descriptor = os.open("/dev/tty", os.O_RDWR | getattr(os, "O_CLOEXEC", 0))
+        if not os.isatty(descriptor):
+            raise UserError("/dev/tty ist kein kontrollierendes Terminal.")
+        write_descriptor(descriptor, message.encode("utf-8", errors="strict"))
+        answer = bytearray()
+        while True:
+            unit = os.read(descriptor, 1)
+            if not unit:
+                raise UserError("Interaktive Terminal-Eingabe wurde abgebrochen.")
+            if unit == b"\n":
+                break
+            answer.extend(unit)
+            if len(answer) > 512:
+                raise UserError("Interaktive Terminal-Eingabe ist zu lang.")
+        return answer.decode("utf-8", errors="strict").rstrip("\r")
+    except UserError:
+        raise
+    except (OSError, UnicodeError, KeyboardInterrupt) as exc:
+        raise UserError(
+            "Der manuelle Firewall-Modus benötigt ein kontrollierendes /dev/tty; "
+            "Pipe-/stdin-Bestätigungen werden nicht akzeptiert."
+        ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def write_descriptor(descriptor: int, payload: bytes) -> None:
+    position = 0
+    while position < len(payload):
+        written = os.write(descriptor, payload[position:])
+        if written <= 0:
+            raise OSError("Terminalausgabe wurde vorzeitig beendet.")
+        position += written
+
+
+def write_tty(message: str) -> None:
+    descriptor: int | None = None
+    try:
+        descriptor = os.open("/dev/tty", os.O_WRONLY | getattr(os, "O_CLOEXEC", 0))
+        if not os.isatty(descriptor):
+            raise UserError("/dev/tty ist kein kontrollierendes Terminal.")
+        write_descriptor(descriptor, message.encode("utf-8", errors="strict"))
+    except UserError:
+        raise
+    except (OSError, UnicodeError) as exc:
+        raise UserError(
+            "Die manuellen Firewall-Anweisungen können nicht sicher am kontrollierenden /dev/tty angezeigt werden."
+        ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def verify_controlling_tty() -> None:
+    try:
+        descriptor = os.open("/dev/tty", os.O_RDWR | getattr(os, "O_CLOEXEC", 0))
+    except OSError as exc:
+        raise UserError(
+            "Der manuelle Firewall-Modus benötigt ein kontrollierendes /dev/tty; "
+            "Pipe-/stdin-Bestätigungen werden nicht akzeptiert."
+        ) from exc
+    try:
+        if not os.isatty(descriptor):
+            raise UserError("/dev/tty ist kein kontrollierendes Terminal.")
+    finally:
+        os.close(descriptor)
+
+
+def choose_number(title: str, values: Sequence[str]) -> int:
+    if not values:
+        raise UserError("Interaktive Auswahl enthält keine Werte.")
+    print(title)
+    for index, value in enumerate(values, start=1):
+        print(f"  {index}) {value}")
+    while True:
+        answer = prompt("Auswahl [1]: ").strip() or "1"
+        if answer.isdigit():
+            selected = int(answer, 10)
+            if 1 <= selected <= len(values):
+                return selected - 1
+        print("Bitte eine aufgeführte Nummer wählen.", file=sys.stderr)
+
+
+def choose_persona_class(explicit: str | None) -> str:
+    if explicit:
+        if explicit not in PERSONA_CLASSES:
+            raise UserError("Persona muss basic, performance oder workstation sein.")
+        return explicit
+    selected = choose_number("Persona für diese disposable VM:", PERSONA_DESCRIPTIONS)
+    return PERSONA_CLASSES[selected]
+
+
+def confirm_tty(message: str, *, default_yes: bool = False) -> bool:
+    suffix = "[Y/n]: " if default_yes else "[y/N]: "
+    answer = prompt_tty(f"{message} {suffix}").strip().lower()
+    if not answer:
+        return default_yes
+    return answer in {"j", "ja", "y", "yes"}
+
+
+def ensure_private_directory(path: Path) -> Path:
+    expanded = absolute_user_path(path)
+    validate_path_ancestors(expanded)
+    try:
+        os.mkdir(expanded, 0o700)
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise UserError(f"Privates Verzeichnis kann nicht angelegt werden: {expanded}") from exc
+    try:
+        metadata = expanded.lstat()
+    except OSError as exc:
+        raise UserError(f"Privates Verzeichnis kann nicht geprüft werden: {expanded}") from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_mode & 0o077
+    ):
+        raise UserError(f"Privates Verzeichnis hat unsichere Metadaten: {expanded}")
+    return expanded
+
+
+def hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError as exc:
+        raise UserError(f"Artefakt kann nicht gehasht werden: {path}") from exc
+    return digest.hexdigest()
+
+
+def validate_local_artifact(path: Path, label: str) -> tuple[Path, str]:
+    try:
+        expanded = path.resolve(strict=True)
+        metadata = expanded.stat()
+    except OSError as exc:
+        raise UserError(f"{label} fehlt nach dem lokalen Build: {path}") from exc
+    validate_path_ancestors(expanded)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_mode & 0o022
+        or not 1 <= metadata.st_size <= MAX_ARCHIVE_SIZE
+    ):
+        raise UserError(f"{label} hat unsichere Metadaten oder Größe: {expanded}")
+    return expanded, hash_file(expanded)
+
+
+def derive_public_key(identity: Path) -> str:
+    ssh_keygen = resolve_executable(None, name="ssh-keygen", fallback=Path("/usr/bin/ssh-keygen"))
+    public_path = Path(str(identity) + ".pub")
+    if public_path.exists():
+        public_metadata, _ = secure_open_regular(public_path, private=False)
+        if public_metadata.st_size > 16_384:
+            raise UserError(f"SSH-Public-Key ist unerwartet groß: {public_path}")
+        try:
+            line = public_path.read_text(encoding="ascii").strip()
+        except (OSError, UnicodeError) as exc:
+            raise UserError(f"SSH-Public-Key kann nicht gelesen werden: {public_path}") from exc
+        try:
+            private_fingerprint = subprocess.run(
+                [str(ssh_keygen), "-lf", str(identity), "-E", "sha256"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+                env=connector_environment(),
+            )
+            public_fingerprint = subprocess.run(
+                [str(ssh_keygen), "-lf", str(public_path), "-E", "sha256"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+                env=connector_environment(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise UserError("SSH-Key-Paar konnte nicht geprüft werden.") from exc
+        if (
+            private_fingerprint.returncode != 0
+            or public_fingerprint.returncode != 0
+            or private_fingerprint.stdout.split()[1:2] != public_fingerprint.stdout.split()[1:2]
+        ):
+            raise UserError(f"Public Key passt nicht zum gewählten privaten Key: {public_path}")
+    else:
+        try:
+            result = subprocess.run(
+                [str(ssh_keygen), "-y", "-f", str(identity)],
+                stdout=subprocess.PIPE,
+                stderr=None,
+                check=False,
+                timeout=120,
+                env=connector_environment(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise UserError("Public Key konnte nicht aus dem privaten Key abgeleitet werden.") from exc
+        if result.returncode != 0:
+            raise UserError("Public Key konnte nicht aus dem privaten Key abgeleitet werden.")
+        try:
+            line = result.stdout.decode("ascii", errors="strict").strip()
+        except UnicodeError as exc:
+            raise UserError("Abgeleiteter Public Key ist nicht gültiges ASCII.") from exc
+    fields = line.split()
+    if len(fields) < 2 or fields[0] not in {"ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"}:
+        raise UserError("Gewählter SSH-Key hat keinen unterstützten Public-Key-Typ.")
+    try:
+        decoded = base64.b64decode(fields[1], validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise UserError("Abgeleiteter Public Key enthält ungültiges Base64.") from exc
+    if len(decoded) < 32 or len(fields[1]) > 16_384:
+        raise UserError("Abgeleiteter Public Key hat eine ungültige Größe.")
+    return f"{fields[0]} {fields[1]}"
+
+
+def absolute_user_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.path.expanduser(str(path))))
+
+
+def validate_path_ancestors(path: Path) -> None:
+    """reject redirectable components while allowing root's sticky /tmp."""
+
+    current = path.parent
+    while True:
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise UserError(f"Übergeordnetes Verzeichnis kann nicht geprüft werden: {current}") from exc
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            raise UserError(f"Unsicheres übergeordnetes Verzeichnis: {current}")
+        if metadata.st_uid not in {0, os.getuid()}:
+            raise UserError(f"Übergeordnetes Verzeichnis hat einen fremden Besitzer: {current}")
+        writable = bool(metadata.st_mode & 0o022)
+        trusted_sticky = metadata.st_uid == 0 and bool(metadata.st_mode & stat.S_ISVTX)
+        if writable and not trusted_sticky:
+            raise UserError(f"Übergeordnetes Verzeichnis ist gruppen-/weltbeschreibbar: {current}")
+        if current == current.parent:
+            break
+        current = current.parent
+
+
+def secure_open_regular(path: Path, *, private: bool) -> tuple[os.stat_result, bytes]:
+    validate_path_ancestors(path)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise UserError(f"Datei kann nicht sicher geöffnet werden: {path}") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise UserError(f"Datei ist keine reguläre Datei: {path}")
+        if metadata.st_uid != os.getuid():
+            raise UserError(f"Datei gehört nicht dem aktuellen Benutzer: {path}")
+        forbidden_mode = 0o077 if private else 0o022
+        if metadata.st_mode & forbidden_mode:
+            detail = "Gruppen-/Fremdzugriff" if private else "Gruppen-/Fremdschreibzugriff"
+            raise UserError(f"Datei hat unsicheren {detail}: {path}")
+        return metadata, os.read(descriptor, 512)
+    finally:
+        os.close(descriptor)
+
+
+def validate_private_key(path: Path) -> Path:
+    expanded = absolute_user_path(path)
+    if not SSH_PATH_RE.fullmatch(str(expanded)):
+        raise UserError(
+            "Privater SSH-Key-Pfad enthält Zeichen, die OpenSSH umdeuten könnte; "
+            "verwende einen absoluten Pfad ohne Leerraum, %, $, Quotes oder Backslash."
+        )
+    _, header = secure_open_regular(expanded, private=True)
+    first_line = header.splitlines()[0] if header else b""
+    if first_line not in PRIVATE_KEY_HEADERS:
+        raise UserError(f"Datei sieht nicht wie ein unterstützter OpenSSH-/PEM-Privatschlüssel aus: {expanded}")
+    ssh_keygen = resolve_executable(None, name="ssh-keygen", fallback=Path("/usr/bin/ssh-keygen"))
+    try:
+        result = subprocess.run(
+            [str(ssh_keygen), "-l", "-f", str(expanded)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=10,
+            env=connector_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise UserError(f"Privater SSH-Key konnte nicht sicher validiert werden: {expanded}") from exc
+    if result.returncode != 0:
+        raise UserError(f"Privater SSH-Key ist strukturell ungültig: {expanded}")
+    return expanded
+
+
+def validate_known_hosts(path: Path) -> Path:
+    expanded = absolute_user_path(path)
+    if not SSH_PATH_RE.fullmatch(str(expanded)):
+        raise UserError(
+            "known_hosts-Pfad enthält Zeichen, die OpenSSH umdeuten könnte; "
+            "verwende einen absoluten Pfad ohne Leerraum, %, $, Quotes oder Backslash."
+        )
+    metadata, _ = secure_open_regular(expanded, private=False)
+    if metadata.st_size > MAX_KNOWN_HOSTS_SIZE:
+        raise UserError("known_hosts überschreitet das feste 1-MiB-Prüflimit.")
+    return expanded
+
+
+def discover_private_keys(ssh_directory: Path) -> list[Path]:
+    root = absolute_user_path(ssh_directory)
+    try:
+        root_metadata = root.lstat()
+    except OSError:
+        return []
+    if (
+        not stat.S_ISDIR(root_metadata.st_mode)
+        or stat.S_ISLNK(root_metadata.st_mode)
+        or root_metadata.st_uid != os.getuid()
+        or root_metadata.st_mode & 0o022
+    ):
+        return []
+
+    candidates: list[Path] = []
+    for current_root, directories, filenames in os.walk(root, topdown=True, followlinks=False):
+        current = Path(current_root)
+        relative_depth = len(current.relative_to(root).parts)
+        if relative_depth >= 3:
+            directories[:] = []
+        else:
+            safe_directories: list[str] = []
+            for directory in directories:
+                candidate = current / directory
+                try:
+                    metadata = candidate.lstat()
+                except OSError:
+                    continue
+                if (
+                    stat.S_ISDIR(metadata.st_mode)
+                    and not stat.S_ISLNK(metadata.st_mode)
+                    and metadata.st_uid == os.getuid()
+                    and not metadata.st_mode & 0o022
+                ):
+                    safe_directories.append(directory)
+            directories[:] = safe_directories
+
+        for filename in filenames:
+            if filename.endswith(".pub") or filename in {
+                "authorized_keys",
+                "config",
+                "known_hosts",
+                "known_hosts.old",
+            }:
+                continue
+            candidate = current / filename
+            try:
+                candidates.append(validate_private_key(candidate))
+            except UserError:
+                continue
+    return sorted(set(candidates), key=lambda path: str(path))
+
+
+def choose_private_key(ssh_directory: Path) -> Path:
+    root = absolute_user_path(ssh_directory)
+    keys = discover_private_keys(ssh_directory)
+    if not keys:
+        raise UserError(
+            f"Keine sichere private SSH-Key-Datei unter {ssh_directory.expanduser()} gefunden. "
+            "Mit --identity kann eine Datei explizit angegeben werden."
+        )
+    selected = choose_number(
+        "Verfügbare private SSH-Schlüssel:",
+        [str(path.relative_to(root)) for path in keys],
+    )
+    return keys[selected]
+
+
+def prompt_source_ip() -> str:
+    while True:
+        try:
+            return normalize_source_ip(prompt_tty("IP für Access: "))
+        except UserError as exc:
+            if "/dev/tty" in str(exc) or "Terminal-Eingabe" in str(exc):
+                raise
+            write_tty(f"FEHLER: {exc}\n")
+
+
+def verify_matching_ip_family(target: Target, source_cidr: str) -> None:
+    target_address = ipaddress.ip_address(target.host)
+    source_address = ipaddress.ip_interface(source_cidr).ip
+    if target_address.version != 4 or source_address.version != 4:
+        raise UserError("PBP deaktiviert IPv6 systemweit; Ziel und Access-IP müssen öffentliche IPv4-Adressen sein.")
+
+
+def verify_local_port_available(local_port: int) -> None:
+    """catch a local tunnel-port collision before any manual cloud change."""
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.set_inheritable(False)
+        probe.bind(("127.0.0.1", local_port))
+    except OSError as exc:
+        raise UserError(
+            f"Lokaler Tunnel-Port 127.0.0.1:{local_port} ist bereits belegt; "
+            "die Cloud-Firewall wurde noch nicht zur Bestätigung freigegeben."
+        ) from exc
+    finally:
+        probe.close()
+
+
+def resolve_executable(value: str | None, *, name: str, fallback: Path | None = None) -> Path:
+    candidate: str | None = value
+    if not candidate and fallback and fallback.is_file():
+        candidate = str(fallback)
+    if not candidate:
+        candidate = shutil.which(name)
+    elif "/" not in candidate:
+        candidate = shutil.which(candidate)
+    if not candidate:
+        raise UserError(f"Benötigtes Programm nicht gefunden: {name}")
+    try:
+        path = Path(candidate).expanduser().resolve(strict=True)
+        metadata = path.stat()
+    except OSError as exc:
+        raise UserError(f"Programm kann nicht geprüft werden: {candidate}") from exc
+    validate_path_ancestors(path)
+    if not stat.S_ISREG(metadata.st_mode) or not os.access(path, os.X_OK):
+        raise UserError(f"Programm ist keine ausführbare reguläre Datei: {path}")
+    if metadata.st_uid not in {0, os.getuid()} or metadata.st_mode & 0o022:
+        raise UserError(f"Programm ist nicht vertrauenswürdig besessen oder beschreibbar: {path}")
+    return path
+
+
+def verify_known_host_pin(known_hosts: Path, target: Target, ssh_port: int) -> None:
+    ssh_keygen = resolve_executable(None, name="ssh-keygen", fallback=Path("/usr/bin/ssh-keygen"))
+    lookup = target.host if ssh_port == 22 else f"[{target.host}]:{ssh_port}"
+    try:
+        result = subprocess.run(
+            [str(ssh_keygen), "-F", lookup, "-f", str(known_hosts)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=10,
+            env=connector_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise UserError("Der lokale known_hosts-Pin konnte nicht geprüft werden.") from exc
+    if result.returncode != 0:
+        raise UserError(
+            f"Für {lookup} fehlt ein unabhängig verifizierter Host-Key in {known_hosts}; "
+            "die Firewall bleibt geschlossen."
+        )
+    try:
+        lines = result.stdout.decode("utf-8", errors="strict").splitlines()
+    except UnicodeError as exc:
+        raise UserError("Der known_hosts-Treffer ist nicht sicher als UTF-8 prüfbar.") from exc
+
+    exact_match = False
+    unsafe_match = False
+    key_record_count = 0
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key_record_count += 1
+        fields = stripped.split()
+        if not fields:
+            continue
+        if fields[0].startswith("@"):
+            unsafe_match = True
+            continue
+        if len(fields) < 3:
+            unsafe_match = True
+            continue
+        hosts = fields[0]
+        if hosts.startswith("|1|"):
+            # ssh-keygen -f already verified that this salted hash is an exact
+            # match for lookup; the entry has no marker and one host hash.
+            if hosts.count("|") == 3 and "," not in hosts:
+                exact_match = True
+            else:
+                unsafe_match = True
+        elif hosts == lookup:
+            exact_match = True
+        else:
+            # wildcards, negation and comma lists must never become the pin
+            # which authorizes a manual cloud-firewall change.
+            unsafe_match = True
+
+    if unsafe_match or not exact_match or key_record_count != 1:
+        raise UserError(
+            f"known_hosts für {lookup} muss genau einen exakten, unmarkierten "
+            "Literal-/Hash-Key enthalten; mehrere Keys, Wildcards, Hostlisten, "
+            "@cert-authority und @revoked sind verboten."
+        )
+
+
+def known_host_lookup(target: Target, ssh_port: int) -> str:
+    return target.host if ssh_port == 22 else f"[{target.host}]:{ssh_port}"
+
+
+def scan_ed25519_host_key(target: Target, ssh_port: int) -> tuple[str, str]:
+    ssh_keyscan = resolve_executable(None, name="ssh-keyscan", fallback=Path("/usr/bin/ssh-keyscan"))
+    try:
+        result = subprocess.run(
+            [
+                str(ssh_keyscan),
+                "-T",
+                str(HOSTKEY_SCAN_TIMEOUT),
+                "-p",
+                str(ssh_port),
+                "-t",
+                "ed25519",
+                target.host,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=HOSTKEY_SCAN_TIMEOUT + 3,
+            env=connector_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise UserError("SSH-Host-Key-Kandidat konnte nicht von der neuen VM gelesen werden.") from exc
+    if result.returncode != 0 or len(result.stdout) > 65_536:
+        raise UserError("SSH-Host-Key-Kandidat konnte nicht von der neuen VM gelesen werden.")
+    try:
+        raw_lines = result.stdout.decode("ascii", errors="strict").splitlines()
+    except UnicodeError as exc:
+        raise UserError("SSH-Host-Key-Kandidat ist kein gültiges ASCII.") from exc
+
+    candidates: set[str] = set()
+    for raw_line in raw_lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) != 3 or fields[1] != "ssh-ed25519":
+            raise UserError("ssh-keyscan lieferte einen unerwarteten Host-Key-Datensatz.")
+        try:
+            decoded = base64.b64decode(fields[2], validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise UserError("SSH-Host-Key-Kandidat enthält ungültiges Base64.") from exc
+        if len(decoded) < 32 or len(fields[2]) > 16_384:
+            raise UserError("SSH-Host-Key-Kandidat hat eine ungültige Größe.")
+        candidates.add(f"ssh-ed25519 {fields[2]}")
+    if len(candidates) != 1:
+        raise UserError("Die neue VM lieferte nicht genau einen eindeutigen Ed25519-Host-Key.")
+    public_key = next(iter(candidates))
+    blob = base64.b64decode(public_key.split()[1], validate=True)
+    fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode("ascii").rstrip("=")
+    if HOSTKEY_FINGERPRINT_RE.fullmatch(fingerprint) is None:
+        raise UserError("Berechneter SSH-Host-Key-Fingerprint ist ungültig.")
+    return public_key, fingerprint
+
+
+def managed_known_hosts_path(ssh_directory: Path, target: Target, ssh_port: int) -> Path:
+    root = absolute_user_path(ssh_directory)
+    try:
+        metadata = root.lstat()
+    except OSError as exc:
+        raise UserError(f"SSH-Verzeichnis kann nicht geprüft werden: {root}") from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_mode & 0o022
+    ):
+        raise UserError(f"SSH-Verzeichnis hat unsichere Metadaten: {root}")
+    pin_root = ensure_private_directory(root / "pbp-m-known-hosts")
+    filename = f"{target.host.replace('.', '_')}-{ssh_port}.known_hosts"
+    return pin_root / filename
+
+
+def atomic_write_known_host(path: Path, target: Target, ssh_port: int, public_key: str) -> Path:
+    lookup = known_host_lookup(target, ssh_port)
+    payload = f"{lookup} {public_key}\n".encode("ascii")
+    temporary = path.parent / f".{path.name}.{secrets.token_hex(8)}"
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        write_descriptor(descriptor, payload)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        if path.exists() or path.is_symlink():
+            validate_known_hosts(path)
+        os.replace(temporary, path)
+        directory_descriptor = os.open(
+            path.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except (OSError, UnicodeError) as exc:
+        raise UserError(f"Verifizierter Host-Key-Pin konnte nicht gespeichert werden: {path}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    validated = validate_known_hosts(path)
+    verify_known_host_pin(validated, target, ssh_port)
+    return validated
+
+
+def managed_pin_matches(path: Path, target: Target, ssh_port: int, public_key: str) -> bool:
+    try:
+        validated = validate_known_hosts(path)
+        verify_known_host_pin(validated, target, ssh_port)
+        content = path.read_text(encoding="ascii")
+    except (UserError, OSError, UnicodeError):
+        return False
+    return content == f"{known_host_lookup(target, ssh_port)} {public_key}\n"
+
+
+def ensure_setup_host_pin(
+    target: Target,
+    ssh_port: int,
+    ssh_directory: Path,
+    explicit_known_hosts: Path | None,
+    expected_fingerprint: str | None,
+) -> Path:
+    if explicit_known_hosts is not None:
+        if expected_fingerprint is not None:
+            raise UserError(
+                "--known-hosts und --hostkey-fingerprint sind zwei alternative "
+                "Vertrauensanker und dürfen beim Setup nicht kombiniert werden."
+            )
+        known_hosts = validate_known_hosts(explicit_known_hosts)
+        verify_known_host_pin(known_hosts, target, ssh_port)
+        return known_hosts
+
+    public_key, observed_fingerprint = scan_ed25519_host_key(target, ssh_port)
+    if expected_fingerprint is not None:
+        if HOSTKEY_FINGERPRINT_RE.fullmatch(expected_fingerprint) is None:
+            raise UserError("Host-Key-Fingerprint muss exakt das Format SHA256:... haben.")
+        if not hmac.compare_digest(expected_fingerprint, observed_fingerprint):
+            raise UserError("Host-Key-Fingerprint stimmt nicht mit der neuen VM überein; SSH bleibt geschlossen.")
+    pin_path = managed_known_hosts_path(ssh_directory, target, ssh_port)
+    if pin_path.exists() and managed_pin_matches(pin_path, target, ssh_port, public_key):
+        write_stderr(f"Bereits verifizierter Host-Key-Pin wird wiederverwendet: {observed_fingerprint}")
+        return validate_known_hosts(pin_path)
+
+    write_tty(f"\n=== SSH-HOST-KEY DER NEUEN VM ===\nVon der SSH-Verbindung beobachtet: {observed_fingerprint}\n")
+    if expected_fingerprint is None and not confirm_tty(
+        "Fingerprint über die unabhängige Provider-/Recovery-Konsole prüfen?",
+        default_yes=True,
+    ):
+        write_tty(
+            "\nWARNUNG: Host-Key nicht unabhängig verifiziert. Der von ssh-keyscan "
+            "beobachtete Schlüssel wird nur als TOFU-Pin gespeichert. Ein Angreifer "
+            "beim ersten Kontakt kann damit nicht ausgeschlossen werden.\n"
+        )
+        return atomic_write_known_host(pin_path, target, ssh_port, public_key)
+
+    instructions = """
+Öffne jetzt die unabhängige Provider-/Recovery-Konsole dieser VM und führe dort aus:
+  sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
+
+Kopiere ausschließlich den dort angezeigten SHA256:...-Fingerprint hierher.
+ssh-keyscan allein wird nicht als Vertrauensanker verwendet.
+"""
+    write_tty(instructions)
+    expected = expected_fingerprint or prompt_tty("Fingerprint aus Providerkonsole: ").strip()
+    if HOSTKEY_FINGERPRINT_RE.fullmatch(expected) is None:
+        raise UserError("Host-Key-Fingerprint muss exakt das Format SHA256:... haben.")
+    if not hmac.compare_digest(expected, observed_fingerprint):
+        raise UserError("Host-Key-Fingerprint stimmt nicht mit der neuen VM überein; SSH bleibt geschlossen.")
+    return atomic_write_known_host(pin_path, target, ssh_port, public_key)
+
+
+def parse_lease(raw: bytes, expected: Lease) -> Lease:
+    if not raw or len(raw) > MAX_HELPER_OUTPUT:
+        raise UserError("Allowlist-Adapter lieferte keine gültige begrenzte Antwort.")
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise UserError("Allowlist-Adapter lieferte kein gültiges JSON.") from exc
+    if not isinstance(document, dict) or set(document) != {
+        "schema",
+        "lease_id",
+        "host",
+        "source_cidr",
+        "ssh_port",
+    }:
+        raise UserError("Allowlist-Adapter lieferte nicht das erwartete Lease-Schema.")
+    if (
+        not isinstance(document.get("schema"), str)
+        or not isinstance(document.get("lease_id"), str)
+        or not isinstance(document.get("host"), str)
+        or not isinstance(document.get("source_cidr"), str)
+        or not isinstance(document.get("ssh_port"), int)
+        or isinstance(document.get("ssh_port"), bool)
+    ):
+        raise UserError("Allowlist-Adapter lieferte ungültige Feldtypen.")
+    received = Lease(
+        lease_id=document["lease_id"],
+        host=document["host"],
+        source_cidr=document["source_cidr"],
+        ssh_port=document["ssh_port"],
+    )
+    if document.get("schema") != WHITELIST_SCHEMA or not LEASE_ID_RE.fullmatch(received.lease_id):
+        raise UserError("Allowlist-Adapter lieferte eine ungültige Schema- oder Lease-ID.")
+    if (
+        received.host != expected.host
+        or received.source_cidr != expected.source_cidr
+        or received.ssh_port != expected.ssh_port
+    ):
+        raise UserError("Allowlist-Adapter bestätigte nicht exakt Host, Quell-IP und SSH-Port.")
+    return received
+
+
+def stop_helper(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def run_helper_bounded(command: Sequence[str], timeout: int) -> subprocess.CompletedProcess[bytes]:
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env=helper_environment(),
+    )
+    if process.stdout is None:
+        stop_helper(process)
+        raise OSError("Allowlist-Adapter hat keinen lesbaren stdout-Kanal.")
+
+    output = bytearray()
+    deadline = time.monotonic() + timeout
+    descriptor = process.stdout.fileno()
+    try:
+        os.set_blocking(descriptor, False)
+        while True:
+            try:
+                chunk = os.read(descriptor, min(4096, MAX_HELPER_OUTPUT + 1 - len(output)))
+            except BlockingIOError:
+                chunk = None
+
+            if chunk == b"":
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                try:
+                    returncode = process.wait(timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    raise subprocess.TimeoutExpired(command, timeout) from None
+                return subprocess.CompletedProcess(command, returncode, bytes(output), b"")
+            if chunk:
+                output.extend(chunk)
+                if len(output) > MAX_HELPER_OUTPUT:
+                    raise UserError(
+                        "Allowlist-Adapter überschritt das feste 4096-Byte-Antwortlimit; SSH wird nicht gestartet."
+                    )
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(command, timeout)
+            if chunk is None:
+                time.sleep(0.02)
+    except BaseException:
+        stop_helper(process)
+        raise
+    finally:
+        process.stdout.close()
+
+
+def acquire_lease(
+    helper: Path,
+    *,
+    host: str,
+    source_cidr: str,
+    ssh_port: int,
+    ttl: int,
+) -> Lease:
+    expected = Lease(lease_id="pending", host=host, source_cidr=source_cidr, ssh_port=ssh_port)
+    command = [
+        str(helper),
+        "acquire",
+        "--host",
+        host,
+        "--source-cidr",
+        source_cidr,
+        "--ssh-port",
+        str(ssh_port),
+        "--ttl-seconds",
+        str(ttl),
+    ]
+    try:
+        result = run_helper_bounded(command, HELPER_ACQUIRE_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        raise UserError("Allowlist-Adapter überschritt das feste Zeitlimit; SSH wird nicht gestartet.") from exc
+    except OSError as exc:
+        raise UserError("Allowlist-Adapter konnte nicht gestartet werden.") from exc
+    if result.returncode != 0:
+        raise UserError(
+            f"Allowlist-Adapter verweigerte die Firewall-Freigabe (Exit {result.returncode}); SSH wird nicht gestartet."
+        )
+    try:
+        return parse_lease(result.stdout, expected)
+    except UserError:
+        # a helper may have created a lease before returning a malformed or
+        # mismatched confirmation. revoke a syntactically safe ID when
+        # possible; the mandatory provider TTL remains the final backstop.
+        try:
+            document = json.loads(result.stdout.decode("utf-8"))
+            lease_id = document.get("lease_id") if isinstance(document, dict) else None
+        except (UnicodeError, json.JSONDecodeError):
+            lease_id = None
+        if isinstance(lease_id, str) and LEASE_ID_RE.fullmatch(lease_id):
+            release_lease(
+                helper,
+                Lease(
+                    lease_id=lease_id,
+                    host=host,
+                    source_cidr=source_cidr,
+                    ssh_port=ssh_port,
+                ),
+            )
+        raise
+
+
+def release_lease(helper: Path, lease: Lease) -> bool:
+    command = [str(helper), "release", "--lease-id", lease.lease_id]
+    try:
+        result = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=HELPER_RELEASE_TIMEOUT,
+            env=helper_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def connector_environment() -> dict[str, str]:
+    """keep provider credentials and python/shell injection variables out of SSH."""
+
+    environment = {"PATH": SAFE_SYSTEM_PATH}
+    for name in ("HOME", "USER", "LOGNAME", "LANG", "TERM", "TZ"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    for name in ("LC_ALL", "LC_CTYPE", "LC_MESSAGES"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    return environment
+
+
+def helper_environment() -> dict[str, str]:
+    """preserve provider credentials but remove interpreter injection knobs."""
+
+    environment = os.environ.copy()
+    exact = {
+        "BASH_ENV",
+        "CDPATH",
+        "ENV",
+        "GCONV_PATH",
+        "IFS",
+        "NODE_OPTIONS",
+        "PERL5LIB",
+        "PERLLIB",
+        "RUBYLIB",
+        "RUBYOPT",
+        "ZDOTDIR",
+    }
+    prefixes = ("DYLD_", "LD_", "PYTHON")
+    for name in list(environment):
+        if name in exact or name.startswith(prefixes):
+            environment.pop(name, None)
+    environment["PATH"] = SAFE_SYSTEM_PATH
+    return environment
+
+
+def choose_browser_build_mode(
+    script_directory: Path,
+    *,
+    accept_disposable_test: bool,
+) -> BrowserBuildMode:
+    maintenance = script_directory / "browser-maintenance.py"
+    if not maintenance.is_file() or maintenance.is_symlink():
+        raise UserError(f"Browser-Sicherheitsgate fehlt oder ist unsicher: {maintenance}")
+    python = resolve_executable(None, name="python3", fallback=Path("/usr/bin/python3"))
+    command = [str(python), "-I", str(maintenance)]
+    try:
+        release = subprocess.run(
+            [*command, "release"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+            env=connector_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise UserError("Lokales Browser-Sicherheitsgate konnte nicht ausgeführt werden.") from exc
+    if len(release.stdout) > MAX_REMOTE_OUTPUT:
+        raise UserError("Lokales Browser-Sicherheitsgate lieferte unerwartet viel Ausgabe.")
+    if release.returncode == 0:
+        write_stderr(release.stdout.decode("utf-8", errors="replace").rstrip())
+        return BrowserBuildMode(disposable_test=False)
+
+    try:
+        disposable = subprocess.run(
+            [*command, "disposable-test"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+            env=connector_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise UserError("Disposable-Testgate konnte nicht ausgeführt werden.") from exc
+    combined = release.stdout + disposable.stdout
+    if len(combined) > 2 * MAX_REMOTE_OUTPUT:
+        raise UserError("Browser-Testgate lieferte unerwartet viel Ausgabe.")
+    text = combined.decode("utf-8", errors="replace").rstrip()
+    if disposable.returncode != 0:
+        write_stderr(text)
+        raise UserError(
+            "Der Browserstand ist weder releasefähig noch als eng begrenzter Disposable-Testbuild zulässig."
+        )
+    write_tty(
+        "\n=== DISPOSABLE BROWSER-TEST ===\n"
+        + text
+        + "\n\nDer aktuelle Camoufox/Gecko-Stand ist NICHT sicherheitsfreigegeben.\n"
+        "Er darf nur auf dieser Wegwerf-VM für einen Funktionstest ohne sensible\n"
+        "Accounts, Passwörter oder Daten verwendet werden. Das normale Release-Gate\n"
+        "bleibt blockiert und wird nicht verändert.\n"
+    )
+    if not accept_disposable_test and not confirm_tty(
+        "Diesen klar markierten Disposable-Testbuild verwenden?", default_yes=True
+    ):
+        raise UserError("Disposable-Testbuild wurde nicht freigegeben.")
+    return BrowserBuildMode(disposable_test=True)
+
+
+def build_provision_artifacts(
+    script_directory: Path,
+    architecture: str,
+    mode: BrowserBuildMode,
+    build_root: Path,
+) -> ProvisionArtifacts:
+    if architecture not in {"amd64", "arm64"}:
+        raise UserError(f"Nicht unterstützte VM-Architektur: {architecture}")
+    ssh_builder = resolve_executable(
+        str(script_directory.parent / "ssh" / "make-toolkit-release.sh"),
+        name="make-toolkit-release.sh",
+    )
+    pbp_builder = resolve_executable(
+        str(script_directory / "make-release.sh"),
+        name="make-release.sh",
+    )
+    ssh_output = build_root / "ssh"
+    pbp_output = build_root / "pbp"
+    build_environment = connector_environment()
+    build_environment["TOOLKIT_DIST_DIR"] = str(ssh_output)
+    write_stderr("  SSH-/GUI-Paket prüfen und verpacken …")
+    try:
+        ssh_result = subprocess.run(
+            [str(ssh_builder)],
+            stdout=subprocess.DEVNULL,
+            check=False,
+            env=build_environment,
+        )
+    except OSError as exc:
+        raise UserError("SSH-/GUI-Artefaktbuilder konnte nicht gestartet werden.") from exc
+    if ssh_result.returncode != 0:
+        raise UserError(f"SSH-/GUI-Artefaktbuild schlug fehl (Exit {ssh_result.returncode}).")
+
+    build_environment["TOOLKIT_DIST_DIR"] = str(pbp_output)
+    pbp_arguments = [str(pbp_builder)]
+    if mode.disposable_test:
+        pbp_arguments.append("--disposable-test-run")
+    pbp_arguments.append(architecture)
+    write_stderr(f"  PBP-Paket für linux-{architecture} prüfen und verpacken …")
+    try:
+        pbp_result = subprocess.run(
+            pbp_arguments,
+            stdout=subprocess.DEVNULL,
+            check=False,
+            env=build_environment,
+        )
+    except OSError as exc:
+        raise UserError("PBP-Artefaktbuilder konnte nicht gestartet werden.") from exc
+    if pbp_result.returncode != 0:
+        raise UserError(f"PBP-Artefaktbuild schlug fehl (Exit {pbp_result.returncode}).")
+
+    ssh_archive, ssh_digest = validate_local_artifact(ssh_output / "ssh.tar.gz", "SSH-/GUI-Artefakt")
+    if mode.disposable_test:
+        pbp_path = pbp_output / "disposable-test" / f"linux-{architecture}" / "pbp-disposable-test.tar.gz"
+    else:
+        pbp_path = pbp_output / f"linux-{architecture}" / "pbp.tar.gz"
+    pbp_archive, pbp_digest = validate_local_artifact(pbp_path, "PBP-Artefakt")
+    write_stderr(f"  OK SSH-/GUI-Artefakt: {path_size(ssh_archive, 'SSH-/GUI-Artefakt')}")
+    write_stderr(f"  OK PBP-Artefakt:      {path_size(pbp_archive, 'PBP-Artefakt')}")
+    return ProvisionArtifacts(
+        ssh_archive=ssh_archive,
+        pbp_archive=pbp_archive,
+        ssh_sha256=ssh_digest,
+        pbp_sha256=pbp_digest,
+    )
+
+
+def provisioning_ssh_arguments(
+    ssh: Path,
+    target: Target,
+    ssh_port: int,
+    identity: Path,
+    known_hosts: Path,
+) -> list[str]:
+    if not ssh.is_absolute():
+        raise UserError("Der aufgelöste SSH-Clientpfad ist nicht absolut.")
+    return [
+        "-F",
+        "none",
+        "-p",
+        str(ssh_port),
+        "-o",
+        f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
+        "-o",
+        "ConnectionAttempts=1",
+        "-o",
+        "ClearAllForwardings=yes",
+        "-o",
+        "ForwardAgent=no",
+        "-o",
+        "ForwardX11=no",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "IdentityAgent=none",
+        "-o",
+        "PreferredAuthentications=publickey",
+        "-o",
+        "PasswordAuthentication=no",
+        "-o",
+        "KbdInteractiveAuthentication=no",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "GlobalKnownHostsFile=none",
+        "-o",
+        f"UserKnownHostsFile={known_hosts}",
+        "-o",
+        "UpdateHostKeys=no",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=3",
+        "-o",
+        "TCPKeepAlive=no",
+        "-i",
+        str(identity),
+    ]
+
+
+def start_ssh_control_master(
+    target: Target,
+    ssh_port: int,
+    identity: Path,
+    known_hosts: Path,
+) -> SSHControlMaster:
+    ssh = resolve_executable(None, name="ssh", fallback=Path("/usr/bin/ssh"))
+    common = provisioning_ssh_arguments(ssh, target, ssh_port, identity, known_hosts)
+    temporary = tempfile.TemporaryDirectory(prefix="pbp-m-ssh-")
+    socket_path = Path(temporary.name) / "control"
+    command = [
+        str(ssh),
+        *common,
+        "-M",
+        "-S",
+        str(socket_path),
+        "-o",
+        "ControlMaster=yes",
+        "-o",
+        "ControlPersist=no",
+        "-N",
+        "-T",
+        "--",
+        target.ssh_destination,
+    ]
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            env=connector_environment(),
+        )
+    except OSError as exc:
+        temporary.cleanup()
+        raise UserError("Die abgesicherte SSH-Provisioning-Verbindung konnte nicht gestartet werden.") from exc
+
+    deadline = time.monotonic() + SSH_CONNECT_TIMEOUT + 10
+    while time.monotonic() < deadline:
+        returncode = process.poll()
+        if returncode is not None:
+            temporary.cleanup()
+            raise UserError(f"Die abgesicherte SSH-Provisioning-Verbindung endete mit Exit {returncode}.")
+        if socket_path.exists():
+            try:
+                check = subprocess.run(
+                    [
+                        str(ssh),
+                        *common,
+                        "-S",
+                        str(socket_path),
+                        "-O",
+                        "check",
+                        "--",
+                        target.ssh_destination,
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=5,
+                    env=connector_environment(),
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                check = None
+            if check is not None and check.returncode == 0:
+                return SSHControlMaster(
+                    ssh=ssh,
+                    common_arguments=common,
+                    destination=target.ssh_destination,
+                    socket_path=socket_path,
+                    process=process,
+                    temporary=temporary,
+                )
+        time.sleep(0.1)
+
+    try:
+        process.terminate()
+        process.wait(timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            process.kill()
+            process.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    temporary.cleanup()
+    raise UserError("Zeitlimit beim Aufbau der abgesicherten SSH-Provisioning-Verbindung.")
+
+
+def stop_ssh_control_master(master: SSHControlMaster) -> None:
+    if master.process.poll() is None:
+        try:
+            subprocess.run(
+                [
+                    str(master.ssh),
+                    *master.common_arguments,
+                    "-S",
+                    str(master.socket_path),
+                    "-O",
+                    "exit",
+                    "--",
+                    master.destination,
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=5,
+                env=connector_environment(),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    try:
+        master.process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            master.process.terminate()
+            master.process.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                master.process.kill()
+                master.process.wait(timeout=2)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    finally:
+        master.temporary.cleanup()
+
+
+def run_remote_bounded(
+    command: Sequence[str],
+    timeout: int,
+) -> subprocess.CompletedProcess[bytes]:
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=connector_environment(),
+    )
+    if process.stdout is None:
+        process.kill()
+        process.wait()
+        raise OSError("Remote-Prozess hat keinen lesbaren Ausgabekanal.")
+
+    output = bytearray()
+    deadline = time.monotonic() + timeout
+    descriptor = process.stdout.fileno()
+    try:
+        os.set_blocking(descriptor, False)
+        while True:
+            read_limit = min(4096, MAX_REMOTE_OUTPUT + 1 - len(output))
+            try:
+                chunk = os.read(descriptor, read_limit)
+            except BlockingIOError:
+                chunk = None
+
+            if chunk == b"":
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                try:
+                    returncode = process.wait(timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    raise subprocess.TimeoutExpired(command, timeout) from None
+                return subprocess.CompletedProcess(command, returncode, bytes(output), b"")
+            if chunk:
+                output.extend(chunk)
+                if len(output) > MAX_REMOTE_OUTPUT:
+                    raise UserError(f"Remote-Ausgabe überschritt das feste {MAX_REMOTE_OUTPUT}-Byte-Limit.")
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(command, timeout)
+            if chunk is None:
+                time.sleep(0.02)
+    except BaseException:
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        try:
+            process.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        raise
+    finally:
+        process.stdout.close()
+
+
+def remote_command(
+    master: SSHControlMaster,
+    remote_script: str,
+    *,
+    label: str,
+    timeout: int,
+    allocate_tty: bool = False,
+    capture: bool = True,
+) -> bytes:
+    if allocate_tty and capture:
+        raise UserError("Interner Fehler: TTY-Remote-Befehle dürfen nicht gepuffert werden.")
+    command = [
+        str(master.ssh),
+        *master.common_arguments,
+        "-S",
+        str(master.socket_path),
+        "-tt" if allocate_tty else "-T",
+        "--",
+        master.destination,
+        remote_script,
+    ]
+    tty_descriptor: int | None = None
+    try:
+        if capture:
+            result = run_remote_bounded(command, timeout)
+        else:
+            if allocate_tty:
+                tty_descriptor = os.open(
+                    "/dev/tty",
+                    os.O_RDWR | getattr(os, "O_CLOEXEC", 0),
+                )
+                if not os.isatty(tty_descriptor):
+                    raise UserError("Mullvad-Dialog benötigt ein kontrollierendes /dev/tty.")
+            result = subprocess.run(
+                command,
+                stdin=tty_descriptor if tty_descriptor is not None else subprocess.DEVNULL,
+                stdout=tty_descriptor if tty_descriptor is not None else None,
+                stderr=tty_descriptor if tty_descriptor is not None else None,
+                check=False,
+                timeout=timeout,
+                env=connector_environment(),
+            )
+    except subprocess.TimeoutExpired as exc:
+        raise UserError(f"{label} überschritt das feste Zeitlimit.") from exc
+    except OSError as exc:
+        raise UserError(f"{label} konnte nicht über SSH gestartet werden.") from exc
+    finally:
+        if tty_descriptor is not None:
+            os.close(tty_descriptor)
+    output = result.stdout or b""
+    if result.returncode != 0:
+        detail = output.decode("utf-8", errors="replace").strip()
+        if detail:
+            write_stderr(detail)
+        raise UserError(f"{label} schlug fehl (Exit {result.returncode}).")
+    return output
+
+
+def remote_preflight(master: SSHControlMaster) -> str:
+    script = (
+        "set -eu\n"
+        'test "$(id -u)" -ne 0\n'
+        "sudo -n true\n"
+        "test -d /run/systemd/system\n"
+        "if command -v cloud-init >/dev/null 2>&1; then "
+        "sudo -n timeout 300 cloud-init status --wait >/dev/null; fi\n"
+        "test -r /etc/os-release\n"
+        ". /etc/os-release\n"
+        "command -v dpkg >/dev/null 2>&1\n"
+        'case "$ID" in\n'
+        '  debian) dpkg --compare-versions "$VERSION_ID" ge 12 ;;\n'
+        '  ubuntu) dpkg --compare-versions "$VERSION_ID" ge 24.04 ;;\n'
+        "  *) exit 41 ;;\n"
+        "esac\n"
+        'arch="$(dpkg --print-architecture)"\n'
+        'case "$arch" in amd64|arm64) ;; *) exit 42 ;; esac\n'
+        'printf \'PBP_PREFLIGHT %s %s %s\\n\' "$ID" "$VERSION_ID" "$arch"\n'
+    )
+    output = remote_command(
+        master,
+        script,
+        label="Remote-Preflight",
+        timeout=REMOTE_PREFLIGHT_TIMEOUT,
+    )
+    matches = re.findall(
+        rb"^PBP_PREFLIGHT (debian|ubuntu) ([0-9][0-9.]*) (amd64|arm64)$",
+        output,
+        flags=re.MULTILINE,
+    )
+    if len(matches) != 1:
+        raise UserError(
+            "Remote-Preflight bestätigte nicht eindeutig Debian 12+/Ubuntu 24.04+, systemd, sudo und Architektur."
+        )
+    distro, version, architecture = (part.decode("ascii") for part in matches[0])
+    write_stderr(f"  OK VM: {distro} {version}, {architecture}, passwordloses sudo verfügbar.")
+    return architecture
+
+
+def fresh_ssh_check(master: SSHControlMaster, label: str) -> None:
+    command = [
+        str(master.ssh),
+        *master.common_arguments,
+        "-S",
+        "none",
+        "-T",
+        "--",
+        master.destination,
+        "sudo -n true",
+    ]
+    last_returncode = 255
+    for attempt in range(1, 7):
+        try:
+            result = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=None if attempt == 6 else subprocess.DEVNULL,
+                check=False,
+                timeout=SSH_CONNECT_TIMEOUT + 5,
+                env=connector_environment(),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            result = None
+        if result is not None:
+            last_returncode = result.returncode
+            if result.returncode == 0:
+                write_stderr(f"  OK {label}: frische unabhängige SSH-Anmeldung erfolgreich.")
+                return
+        if attempt < 6:
+            time.sleep(2)
+    raise UserError(f"{label}: frische SSH-Anmeldung schlug fehl (letzter Exit {last_returncode}).")
+
+
+def upload_file_via_master(
+    master: SSHControlMaster,
+    source: Path,
+    destination: str,
+    label: str,
+) -> None:
+    display_size = path_size(source, label)
+    write_stderr(f"  Sende {label} ({display_size}) …")
+    remote_script = f"set -eu; umask 077; cat > {shlex.quote(destination)}; chmod 0600 {shlex.quote(destination)}"
+    command = [
+        str(master.ssh),
+        *master.common_arguments,
+        "-S",
+        str(master.socket_path),
+        "-T",
+        "--",
+        master.destination,
+        remote_script,
+    ]
+    try:
+        with source.open("rb") as stream:
+            result = subprocess.run(
+                command,
+                stdin=stream,
+                stdout=subprocess.DEVNULL,
+                check=False,
+                timeout=1800,
+                env=connector_environment(),
+            )
+    except subprocess.TimeoutExpired as exc:
+        raise UserError(f"Upload von {label} überschritt das Zeitlimit.") from exc
+    except OSError as exc:
+        raise UserError(f"Upload von {label} konnte nicht gestartet werden.") from exc
+    if result.returncode != 0:
+        raise UserError(f"Upload von {label} schlug fehl (Exit {result.returncode}).")
+    write_stderr(f"  OK {label} übertragen.")
+
+
+def upload_provision_payload(
+    master: SSHControlMaster,
+    artifacts: ProvisionArtifacts,
+    public_key_file: Path,
+    remote_stage: str,
+    mode: BrowserBuildMode,
+) -> None:
+    if REMOTE_STAGE_RE.fullmatch(remote_stage) is None:
+        raise UserError("Interner Remote-Staging-Pfad ist ungültig.")
+    stage = shlex.quote(remote_stage)
+    remote_command(
+        master,
+        f"set -eu; umask 077; test ! -e {stage}; mkdir -m 0700 {stage}",
+        label="Remote-Staging",
+        timeout=30,
+    )
+    upload_file_via_master(master, public_key_file, f"{remote_stage}/admin.pub", "SSH-Public-Key")
+    upload_file_via_master(master, artifacts.ssh_archive, f"{remote_stage}/ssh.tar.gz", "SSH-/GUI-Artefakt")
+    upload_file_via_master(master, artifacts.pbp_archive, f"{remote_stage}/pbp.tar.gz", "PBP-Artefakt")
+
+    write_stderr("  Prüfe SHA-256 und entpacke die Artefakte auf der VM …")
+    ssh_digest = shlex.quote(artifacts.ssh_sha256)
+    pbp_digest = shlex.quote(artifacts.pbp_sha256)
+    package_root = shlex.quote(mode.package_root)
+    verify_script = (
+        f"set -eu; cd {stage}; "
+        f"printf '%s  %s\\n' {ssh_digest} ssh.tar.gz | sha256sum -c -; "
+        f"printf '%s  %s\\n' {pbp_digest} pbp.tar.gz | sha256sum -c -; "
+        "tar -xzf ssh.tar.gz; tar -xzf pbp.tar.gz; "
+        "test -x toolkit-ssh/bootstrap-ssh.sh; "
+        f"test -x {package_root}/bootstrap-pbp.sh; "
+        "test -f admin.pub; test ! -L admin.pub"
+    )
+    remote_command(
+        master,
+        verify_script,
+        label="Remote-Artefaktprüfung",
+        timeout=300,
+    )
+    write_stderr("  OK Remote-Artefakte geprüft und entpackt.")
+
+
+def install_remote_pbp(
+    master: SSHControlMaster,
+    remote_stage: str,
+    target: Target,
+    persona: str,
+    mode: BrowserBuildMode,
+) -> None:
+    if REMOTE_STAGE_RE.fullmatch(remote_stage) is None or persona not in PERSONA_CLASSES:
+        raise UserError("Interne Provisioning-Parameter sind ungültig.")
+    stage = shlex.quote(remote_stage)
+    admin = shlex.quote(target.user)
+    public_key = shlex.quote(f"{remote_stage}/admin.pub")
+    ssh_script = (
+        f"set -eu; cd {stage}/toolkit-ssh; "
+        f"./bootstrap-ssh.sh ssh-gui --user {admin} --public-key-file {public_key} "
+        "--replace-authorized-keys --confirm-key-tested"
+    )
+    write_stderr("  Installiere und härte SSH sowie die ausschließlich getunnelte GUI …")
+    remote_command(
+        master,
+        ssh_script,
+        label="SSH-/GUI-Installation",
+        timeout=3600,
+        capture=False,
+    )
+    fresh_ssh_check(master, "Nach SSH-Härtung")
+
+    progress_step(5, 6, "Mullvad, Kill-Switch und PBP installieren")
+    pbp_arguments = ["./bootstrap-pbp.sh", "--persona-class", persona]
+    if mode.disposable_test:
+        pbp_arguments.append("--accept-disposable-test-browser")
+    pbp_script = f"set -eu; cd {stage}/{shlex.quote(mode.package_root)}; " + " ".join(
+        shlex.quote(argument) for argument in pbp_arguments
+    )
+    write_stderr("  Mullvad Deutschland/Shadowsocks 443 und PBP werden eingerichtet …")
+    remote_command(
+        master,
+        pbp_script,
+        label="Mullvad-/PBP-Installation",
+        timeout=5400,
+        allocate_tty=True,
+        capture=False,
+    )
+    fresh_ssh_check(master, "Nach Mullvad-/PBP-Installation")
+
+
+def verify_remote_pbp(master: SSHControlMaster, persona: str) -> str:
+    if persona not in PERSONA_CLASSES:
+        raise UserError("Interne Persona-Auswahl ist ungültig.")
+    selected = shlex.quote(persona)
+    script = (
+        "set -eu\n"
+        "sudo -n test -x /usr/local/bin/pbp-browser\n"
+        "sudo -n test -x /usr/local/libexec/dynamicflow-pbp-vpn-verify\n"
+        f"sudo -n jq -e --arg selected {selected} "
+        "'.schema == 3 and .persona_class == $selected' "
+        "/etc/toolkit/pbp-persona.json >/dev/null\n"
+        "sudo -n /usr/local/libexec/dynamicflow-pbp-vpn-verify >/dev/null\n"
+        "sudo -n systemctl is-active --quiet 'tigervncserver@:1.service'\n"
+        'geometry="$(sudo -n /usr/sbin/runuser -u malwarelab -- '
+        "env -i PATH=/usr/bin:/bin DISPLAY=:1 "
+        "XAUTHORITY=/home/malwarelab/.Xauthority "
+        '/usr/bin/xdotool getdisplaygeometry)"\n'
+        "test \"$geometry\" = '1600 900'\n"
+        "listeners=\"$(sudo -n ss -H -ltn 'sport = :5901' | awk '{print $4}')\"\n"
+        'test -n "$listeners"\n'
+        "printf '%s\\n' \"$listeners\" | while IFS= read -r endpoint; do\n"
+        "  case \"$endpoint\" in 127.0.0.1:5901|'[::1]:5901') ;; *) exit 51 ;; esac\n"
+        "done\n"
+        'password="$(sudo -n cat /root/.vm-bootstrap-vnc-malwarelab)"\n'
+        'case "$password" in\n'
+        '  ????????) case "$password" in *[!A-Za-z0-9]*) exit 52 ;; esac ;;\n'
+        "  *) exit 52 ;;\n"
+        "esac\n"
+        "printf 'PBP_READY %s\\n' \"$password\"\n"
+    )
+    output = remote_command(
+        master,
+        script,
+        label="PBP-Abschlussprüfung",
+        timeout=REMOTE_VERIFY_TIMEOUT,
+    )
+    matches = re.findall(rb"^PBP_READY ([A-Za-z0-9]{8})$", output, flags=re.MULTILINE)
+    if len(matches) != 1:
+        raise UserError("PBP-Abschlussprüfung lieferte keine eindeutige Bereitschaftsbestätigung.")
+    return matches[0].decode("ascii")
+
+
+def write_setup_vnc_access(vnc_password: str, local_port: int) -> None:
+    if re.fullmatch(r"[A-Za-z0-9]{8}", vnc_password) is None:
+        raise UserError("Interner VNC-Passwortwert ist ungültig.")
+    if not 1 <= local_port <= 65535:
+        raise UserError("Interner lokaler VNC-Port ist ungültig.")
+    write_tty(
+        "\n=== VNC-ZUGANG – JETZT KOPIEREN ===\n"
+        f"VNC-Passwort:  {vnc_password}\n"
+        f"VNC-Ziel:      127.0.0.1::{local_port}\n"
+        "Das Passwort wird in diesem Setup-Lauf genau einmal angezeigt.\n"
+        "Es bleibt für eine bewusst ausgeführte spätere Abfrage root-only auf der VM.\n\n"
+    )
+
+
+def cleanup_remote_stage(master: SSHControlMaster, remote_stage: str) -> None:
+    if REMOTE_STAGE_RE.fullmatch(remote_stage) is None:
+        raise UserError("Unsicherer Remote-Staging-Pfad; automatische Bereinigung verweigert.")
+    stage = shlex.quote(remote_stage)
+    script = (
+        f'set -eu; test -d {stage}; test ! -L {stage}; test "$(stat -c %u {stage})" = "$(id -u)"; rm -rf -- {stage}'
+    )
+    remote_command(master, script, label="Remote-Staging-Bereinigung", timeout=60)
+
+
+def run_connector(command: Sequence[str], coordinator: SignalCoordinator) -> int:
+    try:
+        process = subprocess.Popen(command, env=connector_environment())
+    except OSError as exc:
+        write_stderr(f"FEHLER: GUI-Tunnel-Helper konnte nicht gestartet werden: {exc}")
+        return 1
+
+    coordinator.connector = process
+    signal_deadline: float | None = None
+    try:
+        while True:
+            returncode = process.poll()
+            if returncode is not None:
+                if coordinator.received is not None:
+                    return coordinator.exit_code
+                return 128 - returncode if returncode < 0 else returncode
+
+            if coordinator.received is not None:
+                if signal_deadline is None:
+                    try:
+                        process.send_signal(coordinator.received)
+                    except OSError:
+                        pass
+                    signal_deadline = time.monotonic() + CONNECTOR_SIGNAL_GRACE
+                elif time.monotonic() >= signal_deadline:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    except OSError:
+                        pass
+                    return coordinator.exit_code
+            time.sleep(0.1)
+    finally:
+        coordinator.connector = None
+
+
+def confirm_helper_lease(target: Target, source_cidr: str, identity: Path, ttl: int) -> None:
+    print()
+    print(f"Ziel:       {target.ssh_destination}")
+    print(f"Access-IP:  {source_cidr}")
+    print(f"SSH-Key:    {identity}")
+    print(f"Allowlist:  verifizierter Adapter-Lease, maximal {ttl} Sekunden")
+    answer = prompt("Adapter-Lease setzen und GUI-Tunnel öffnen? [j/N]: ").strip().lower()
+    if answer not in {"j", "ja", "y", "yes"}:
+        raise UserError("Verbindung wurde nicht gestartet.")
+
+
+def confirm_setup_firewall(
+    target: Target,
+    source_cidr: str,
+    ssh_port: int,
+    identity: Path,
+    persona: str,
+    mode: BrowserBuildMode,
+) -> None:
+    build_label = "DISPOSABLE TEST-ONLY" if mode.disposable_test else "security release"
+    gate = f"""
+=== CLOUD-FIREWALL FÜR DIE NEUE PBP-VM ===
+VM:             {target.host}
+SSH-Login:      {target.ssh_destination}
+SSH-Key lokal:  {identity}
+Access-IP:      {source_cidr}
+Persona:        {persona}
+Browser-Build:  {build_label}
+
+Trage beim beliebigen Cloud-Provider exakt diesen finalen Zustand ein:
+
+  INBOUND
+    ALLOW  TCP  Port {ssh_port}  Quelle {source_cidr}  Ziel nur diese VM
+    Sonst keine Inbound-Regel für diese VM.
+
+  OUTBOUND
+    Unverändert / Allow all belassen. Keine neue Egress-Sperre anlegen;
+    Installation, DNS, HTTPS und Mullvad-Shadowsocks auf Port 443 müssen funktionieren.
+
+  WICHTIG
+    - Falls noch keine Cloud-Firewall aktiv ist: erstellen, aktivieren und exakt
+      dieser VM zuordnen; Provider-Aktivierung abwarten.
+    - Jede breitere SSH-Regel entfernen: kein 0.0.0.0/0, kein größeres IPv4-Netz.
+    - Keine IPv6-Inbound-Regel (::/0 oder sonstige Quelle) hinzufügen.
+    - TCP 5901 niemals öffentlich öffnen; VNC läuft nur durch den SSH-Tunnel.
+    - Provider-/Recovery-Konsole offen lassen, bis pbp-m eine frische SSH-Anmeldung
+      nach der Härtung bestätigt hat. Der gehaltene Setup-Kanal verhindert Lockout.
+
+pbp-m verändert keine Cloud-API. Nach der Bestätigung verbindet es sich, baut die
+lokalen Artefakte, richtet SSH/GUI, Mullvad und PBP ein und prüft alles in einem Lauf.
+"""
+    write_tty(gate)
+    try:
+        confirmed = confirm_tty("Cloud-Firewall ist exakt so aktiv und der VM zugeordnet?")
+    except UserError:
+        manual_unconfirmed_reminder(target, source_cidr, ssh_port)
+        raise
+    if not confirmed:
+        manual_unconfirmed_reminder(target, source_cidr, ssh_port)
+        raise UserError("Cloud-Firewall wurde nicht bestätigt.")
+
+
+def confirm_manual_firewall(
+    target: Target,
+    source_cidr: str,
+    ssh_port: int,
+    local_port: int,
+) -> None:
+    gate = f"""
+=== MANUELLER CLOUD-FIREWALL-GATE ===
+Zielserver:         {target.host}
+SSH-Ziel:           {target.ssh_destination}
+Access-IP:          {source_cidr}
+SSH-Key:            lokal vorab validiert
+Lokaler Tunnelport: 127.0.0.1:{local_port} (vorab frei)
+
+Stelle jetzt providerneutral den FINAL wirksamen Firewall-Zustand her:
+  1) Am exakten Zielserver {target.host} müssen alle wirksamen Cloud-Firewalls,
+     Security Groups, ACLs und die Host-Firewall identifiziert sein.
+  2) Inbound TCP Port {ssh_port} ausschließlich von {source_cidr} erlauben und die
+     aktive Zuordnung zum Zielserver abwarten.
+  3) Vor der Bestätigung jede breitere SSH-Freigabe in ALLEN wirksamen Ebenen
+     entfernen/deaktivieren, insbesondere 0.0.0.0/0, ::/0 oder größere Netze.
+  4) TCP 5901 niemals extern freigeben; VNC bleibt ausschließlich im SSH-Tunnel.
+  5) Outbound-Regeln für diesen Schritt unverändert lassen und keine neue
+     einschränkende Outbound-Regel anlegen.
+  6) Die ursprüngliche SSH-Sitzung und eine unabhängige Provider-/Recovery-Konsole offen halten.
+     Erst nach erfolgreichem Aufbau dieser frischen pbp-m-Verbindung schließen.
+
+pbp-m ändert im manuellen Modus selbst keine Cloud-Konfiguration.
+"""
+    write_tty(gate)
+    try:
+        confirmed = confirm_tty("Ist der finale Firewall-Zustand exakt geprüft?")
+    except UserError:
+        manual_unconfirmed_reminder(target, source_cidr, ssh_port)
+        raise
+    if not confirmed:
+        manual_unconfirmed_reminder(target, source_cidr, ssh_port)
+        raise UserError("Manuelles Firewall-Gate wurde nicht bestätigt.")
+
+
+def manual_unconfirmed_reminder(target: Target, source_cidr: str, ssh_port: int) -> None:
+    message = (
+        "\nBEDINGTER FIREWALL-HINWEIS:\n"
+        "Falls du bereits Cloud-Regeln geändert hast, prüfe und entferne die "
+        f"nicht mehr benötigte /32-Regel TCP {ssh_port} von {source_cidr} am "
+        f"exakten Zielserver {target.host} in allen wirksamen Ebenen.\n"
+    )
+    try:
+        write_tty(message)
+    except UserError:
+        write_stderr(message.rstrip())
+
+
+def manual_firewall_final_reminder(target: Target, source_cidr: str, ssh_port: int) -> None:
+    message = (
+        "\nMANUELLE CLOUD-FIREWALL-ABSCHLUSSPRÜFUNG:\n"
+        f"Wenn du die VM {target.host} weiter benutzt, muss ALLOW TCP {ssh_port} "
+        f"von {source_cidr} auf exakt diese VM bestehen bleiben; darüber laufen "
+        "weitere SSH-Verbindungen und der VNC-Tunnel.\n"
+        "Entferne nur alte/stale Access-IPs, breite SSH-Regeln und falsche "
+        "Firewall-/Security-Group-/ACL-Zuordnungen. TCP 5901 muss extern "
+        "geschlossen bleiben.\n"
+        "Bei einem Teilfehler die exakte /32-Regel für die Diagnose behalten. "
+        "Erst wenn du die VM endgültig verwirfst, auch diese Regel beziehungsweise "
+        "ihre VM-Zuordnung entfernen.\n"
+        "pbp-m kann manuell gesetzte Cloud-Regeln weder prüfen noch verändern.\n"
+    )
+    try:
+        write_tty(message)
+    except UserError:
+        write_stderr(message.rstrip())
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="pbp-m",
+        description=(
+            "Richtet interaktiv eine neue disposable PBP-VM vollständig ein oder öffnet "
+            "den gehärteten GUI-Tunnel zu einer bestehenden VM."
+        ),
+        epilog=(
+            "Optionaler verifizierter Adaptermodus: HELPER wird ohne Shell als "
+            "HELPER acquire --host IP --source-cidr CIDR --ssh-port PORT "
+            "--ttl-seconds TTL aufgerufen und muss JSON gemäß "
+            f"{WHITELIST_SCHEMA} liefern. Nach Tunnelende folgt "
+            "HELPER release --lease-id ID."
+        ),
+    )
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument(
+        "--setup",
+        action="store_true",
+        help="neue disposable VM interaktiv komplett einrichten",
+    )
+    action.add_argument(
+        "--connect",
+        action="store_true",
+        help="bestehende VM verbinden (ohne Modusflag weiterhin Standard bei CLI-Argumenten)",
+    )
+    parser.add_argument("target", nargs="?", help="öffentliche IP oder USER@IP; ohne Wert folgt eine Abfrage")
+    parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER, help="Standardbenutzer für HOST")
+    parser.add_argument(
+        "--source-ip",
+        help="Explizite öffentliche Access-Einzel-IP; sonst folgt exakt die Abfrage 'IP für Access:'",
+    )
+    parser.add_argument("--identity", type=Path, help="Expliziter privater SSH-Key")
+    parser.add_argument(
+        "--ssh-directory",
+        type=Path,
+        default=Path("~/.ssh"),
+        help="Verzeichnis für die interaktive Key-Suche (Standard: ~/.ssh)",
+    )
+    parser.add_argument(
+        "--known-hosts",
+        type=Path,
+        help=(
+            "bereits unabhängig verifizierte known_hosts-Datei; beim Setup wird sonst "
+            "ein eigener pro-VM-Pin unter ~/.ssh/pbp-m-known-hosts angelegt"
+        ),
+    )
+    parser.add_argument("--ssh-port", type=validate_port, default=DEFAULT_SSH_PORT)
+    parser.add_argument("--local-port", type=validate_port, default=DEFAULT_LOCAL_PORT)
+    parser.add_argument(
+        "--whitelist-helper",
+        help=(
+            "Aktiviert optional den verifizierten Provider-/Control-Plane-Adaptermodus; "
+            "alternativ PBP_M_WHITELIST_HELPER"
+        ),
+    )
+    parser.add_argument(
+        "--connect-helper",
+        help="GUI-Tunnel-Helper; standardmäßig ../ssh/connect-gui.sh",
+    )
+    parser.add_argument(
+        "--whitelist-ttl",
+        type=validate_ttl,
+        default=DEFAULT_WHITELIST_TTL,
+        help="Nur Adaptermodus: providerseitig erzwungene Lease-TTL (Standard: 14400)",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Nur Adaptermodus: einfache Zusammenfassung überspringen; nie das manuelle Gate",
+    )
+    parser.add_argument(
+        "--persona-class",
+        choices=PERSONA_CLASSES,
+        help="Setup: feste Persona-Klasse für diese Wegwerf-VM",
+    )
+    parser.add_argument(
+        "--hostkey-fingerprint",
+        help="Setup: SHA256:... aus einer unabhängigen Provider-/Recovery-Konsole",
+    )
+    parser.add_argument(
+        "--accept-disposable-test-browser",
+        action="store_true",
+        help="Setup: aktuell markierten TEST-ONLY-Browserbuild ohne zweite Ja/Nein-Abfrage verwenden",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Setup abschließen, aber anschließend keinen GUI-Tunnel offen halten",
+    )
+    return parser
+
+
+def run_connect(arguments: argparse.Namespace) -> int:
+    if not SSH_USER_RE.fullmatch(arguments.ssh_user) or arguments.ssh_user == "root":
+        raise UserError("--ssh-user ist ungültig; Root-Login ist nicht erlaubt.")
+    if (
+        arguments.persona_class is not None
+        or arguments.hostkey_fingerprint is not None
+        or arguments.accept_disposable_test_browser
+        or arguments.no_open
+    ):
+        raise UserError(
+            "--persona-class, --hostkey-fingerprint, --accept-disposable-test-browser "
+            "und --no-open gelten nur mit --setup."
+        )
+
+    raw_target = arguments.target or prompt("PBP-Ziel (öffentliche IP oder USER@IP): ")
+    target = normalize_target(raw_target, arguments.ssh_user)
+    progress_step(1, 2, "SSH-Vertrauen und Cloud-Firewall prüfen")
+    known_hosts_value = arguments.known_hosts
+    if known_hosts_value is None:
+        ssh_root = absolute_user_path(arguments.ssh_directory)
+        managed_candidate = (
+            ssh_root / "pbp-m-known-hosts" / f"{target.host.replace('.', '_')}-{arguments.ssh_port}.known_hosts"
+        )
+        known_hosts_value = (
+            managed_candidate
+            if managed_candidate.exists() or managed_candidate.is_symlink()
+            else Path("~/.ssh/known_hosts")
+        )
+    known_hosts = validate_known_hosts(known_hosts_value)
+    verify_known_host_pin(known_hosts, target, arguments.ssh_port)
+
+    identity = (
+        validate_private_key(arguments.identity) if arguments.identity else choose_private_key(arguments.ssh_directory)
+    )
+
+    script_directory = Path(__file__).resolve().parent
+    connect_value = arguments.connect_helper or os.environ.get("PBP_M_CONNECT_HELPER")
+    connect_helper = resolve_executable(
+        connect_value,
+        name="connect-gui.sh",
+        fallback=script_directory.parent / "ssh" / "connect-gui.sh",
+    )
+    verify_local_port_available(arguments.local_port)
+
+    whitelist_value = arguments.whitelist_helper or os.environ.get("PBP_M_WHITELIST_HELPER")
+    whitelist_helper = resolve_executable(whitelist_value, name="pbp-m-whitelist") if whitelist_value else None
+    if whitelist_helper is None:
+        if arguments.yes:
+            raise UserError(
+                "--yes ist im manuellen Firewall-Modus verboten; "
+                "dieses Gate verlangt eine direkte y/N-Bestätigung am Terminal."
+            )
+        verify_controlling_tty()
+
+    source_cidr = normalize_source_ip(arguments.source_ip) if arguments.source_ip else prompt_source_ip()
+    verify_matching_ip_family(target, source_cidr)
+
+    connector_command = [
+        str(connect_helper),
+        "--identity",
+        str(identity),
+        "--known-hosts",
+        str(known_hosts),
+        "--ssh-port",
+        str(arguments.ssh_port),
+        "--local-port",
+        str(arguments.local_port),
+        target.ssh_destination,
+    ]
+
+    if whitelist_helper is None:
+        confirm_manual_firewall(
+            target,
+            source_cidr,
+            arguments.ssh_port,
+            arguments.local_port,
+        )
+        coordinator = SignalCoordinator()
+        coordinator.install()
+        try:
+            if coordinator.received is None:
+                progress_step(2, 2, "Gehärteten SSH-/VNC-Tunnel öffnen")
+                connector_returncode = run_connector(connector_command, coordinator)
+            else:
+                connector_returncode = coordinator.exit_code
+        finally:
+            try:
+                coordinator.restore()
+            finally:
+                manual_firewall_final_reminder(target, source_cidr, arguments.ssh_port)
+        if coordinator.received is not None:
+            return coordinator.exit_code
+        return connector_returncode
+
+    if not arguments.yes:
+        confirm_helper_lease(target, source_cidr, identity, arguments.whitelist_ttl)
+
+    coordinator = SignalCoordinator()
+    connector_returncode = 1
+    release_ok = True
+    lease: Lease | None = None
+    coordinator.install()
+    try:
+        progress_step(2, 2, "Temporäre SSH-Allowlist setzen und GUI-Tunnel öffnen")
+        write_stderr("  Setze temporäre SSH-Allowlist …")
+        try:
+            lease = acquire_lease(
+                whitelist_helper,
+                host=target.host,
+                source_cidr=source_cidr,
+                ssh_port=arguments.ssh_port,
+                ttl=arguments.whitelist_ttl,
+            )
+        except UserError:
+            if coordinator.received is not None:
+                return coordinator.exit_code
+            raise
+
+        if coordinator.received is None:
+            write_stderr("  OK Allowlist bestätigt; öffne den gehärteten GUI-Tunnel.")
+            connector_returncode = run_connector(connector_command, coordinator)
+        else:
+            connector_returncode = coordinator.exit_code
+    finally:
+        try:
+            if lease is not None:
+                write_stderr("Entferne temporäre SSH-Allowlist …")
+                release_ok = release_lease(whitelist_helper, lease)
+        finally:
+            coordinator.restore()
+
+    if not release_ok:
+        write_stderr(
+            "FEHLER: Allowlist-Lease konnte nicht aktiv entfernt werden. "
+            "Er muss spätestens durch die providerseitige TTL auslaufen."
+        )
+        return 1
+    if coordinator.received is not None:
+        return coordinator.exit_code
+    return connector_returncode
+
+
+def run_setup(arguments: argparse.Namespace) -> int:
+    if not SSH_USER_RE.fullmatch(arguments.ssh_user) or arguments.ssh_user == "root":
+        raise UserError("--ssh-user ist ungültig; Root-Login ist nicht erlaubt.")
+    if arguments.yes:
+        raise UserError("--yes ist beim Einrichten einer neuen VM nicht zulässig.")
+    if arguments.whitelist_helper:
+        raise UserError(
+            "Der neue VM-Setup nutzt absichtlich die einmal bestätigte manuelle "
+            "providerneutrale Cloud-Firewall, keinen Provider-Adapter."
+        )
+    if (
+        arguments.hostkey_fingerprint is not None
+        and HOSTKEY_FINGERPRINT_RE.fullmatch(arguments.hostkey_fingerprint) is None
+    ):
+        raise UserError("--hostkey-fingerprint muss exakt das Format SHA256:... haben.")
+    if arguments.known_hosts is not None and arguments.hostkey_fingerprint is not None:
+        raise UserError("--known-hosts und --hostkey-fingerprint dürfen beim Setup nicht kombiniert werden.")
+
+    verify_controlling_tty()
+    write_stderr("\n=== NEUE PBP-VM EINRICHTEN ===")
+    raw_target = arguments.target or prompt("Neue VM (öffentliche IP oder USER@IP): ")
+    target = normalize_target(raw_target, arguments.ssh_user)
+    identity = (
+        validate_private_key(arguments.identity) if arguments.identity else choose_private_key(arguments.ssh_directory)
+    )
+    public_key = derive_public_key(identity)
+    source_cidr = normalize_source_ip(arguments.source_ip) if arguments.source_ip else prompt_source_ip()
+    verify_matching_ip_family(target, source_cidr)
+    persona = choose_persona_class(arguments.persona_class)
+    if not arguments.no_open:
+        verify_local_port_available(arguments.local_port)
+
+    explicit_known_hosts: Path | None = None
+    if arguments.known_hosts is not None:
+        explicit_known_hosts = validate_known_hosts(arguments.known_hosts)
+        verify_known_host_pin(explicit_known_hosts, target, arguments.ssh_port)
+
+    script_directory = Path(__file__).resolve().parent
+    connect_helper: Path | None = None
+    if not arguments.no_open:
+        connect_value = arguments.connect_helper or os.environ.get("PBP_M_CONNECT_HELPER")
+        connect_helper = resolve_executable(
+            connect_value,
+            name="connect-gui.sh",
+            fallback=script_directory.parent / "ssh" / "connect-gui.sh",
+        )
+
+    mode = choose_browser_build_mode(
+        script_directory,
+        accept_disposable_test=arguments.accept_disposable_test_browser,
+    )
+    confirm_setup_firewall(
+        target,
+        source_cidr,
+        arguments.ssh_port,
+        identity,
+        persona,
+        mode,
+    )
+
+    firewall_confirmed = True
+    setup_signals = SetupSignalGuard()
+    setup_signals.install()
+    master: SSHControlMaster | None = None
+    remote_stage = f"/tmp/dynamicflow-pbp-{secrets.token_hex(12)}"
+    stage_cleaned = False
+    try:
+        progress_step(1, 6, "SSH-Vertrauen und VM prüfen")
+        known_hosts = ensure_setup_host_pin(
+            target,
+            arguments.ssh_port,
+            arguments.ssh_directory,
+            explicit_known_hosts,
+            arguments.hostkey_fingerprint,
+        )
+        master = start_ssh_control_master(
+            target,
+            arguments.ssh_port,
+            identity,
+            known_hosts,
+        )
+        architecture = remote_preflight(master)
+
+        with tempfile.TemporaryDirectory(prefix="pbp-m-build-") as build_name:
+            build_root = Path(build_name)
+            public_key_file = build_root / "admin.pub"
+            descriptor = os.open(
+                public_key_file,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+            try:
+                write_descriptor(descriptor, f"{public_key}\n".encode("ascii"))
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+            progress_step(2, 6, "Lokale Installationsartefakte bauen")
+            artifacts = build_provision_artifacts(
+                script_directory,
+                architecture,
+                mode,
+                build_root,
+            )
+            progress_step(3, 6, "Artefakte sicher zur VM übertragen")
+            upload_provision_payload(
+                master,
+                artifacts,
+                public_key_file,
+                remote_stage,
+                mode,
+            )
+            progress_step(4, 6, "SSH und loopback-only GUI einrichten")
+            install_remote_pbp(
+                master,
+                remote_stage,
+                target,
+                persona,
+                mode,
+            )
+            progress_step(6, 6, "Abschlusszustand prüfen")
+            vnc_password = verify_remote_pbp(master, persona)
+            write_stderr("  OK Browser, Mullvad, Kill-Switch und VNC sind betriebsbereit.")
+
+        cleanup_remote_stage(master, remote_stage)
+        stage_cleaned = True
+        stop_ssh_control_master(master)
+        master = None
+
+        build_label = "DISPOSABLE TEST-ONLY" if mode.disposable_test else "security release"
+        write_tty(
+            "\n=== PBP-VM BEREIT ===\n"
+            f"VM:             {target.ssh_destination}\n"
+            f"Persona:        {persona}\n"
+            f"Browser-Build:  {build_label}\n"
+            f"GUI-Tunnel:     127.0.0.1:{arguments.local_port} -> VM 127.0.0.1:5901\n"
+            "Der private SSH-Key wurde nicht hochgeladen.\n\n"
+        )
+        write_setup_vnc_access(vnc_password, arguments.local_port)
+
+        if arguments.no_open:
+            write_tty(
+                "Der GUI-Tunnel wurde wegen --no-open nicht gestartet. Später mit ./pbp-m --connect zur VM verbinden.\n"
+            )
+            return 0
+
+        assert connect_helper is not None
+        connector_command = [
+            str(connect_helper),
+            "--identity",
+            str(identity),
+            "--known-hosts",
+            str(known_hosts),
+            "--ssh-port",
+            str(arguments.ssh_port),
+            "--local-port",
+            str(arguments.local_port),
+            target.ssh_destination,
+        ]
+        coordinator = SignalCoordinator()
+        coordinator.install()
+        try:
+            write_stderr("Setup erfolgreich; öffne jetzt den gehärteten GUI-Tunnel.")
+            connector_returncode = run_connector(connector_command, coordinator)
+        finally:
+            coordinator.restore()
+        if coordinator.received is not None:
+            return coordinator.exit_code
+        return connector_returncode
+    finally:
+        setup_signals.begin_cleanup()
+        try:
+            if master is not None:
+                stop_ssh_control_master(master)
+            if not stage_cleaned:
+                write_stderr(
+                    f"HINWEIS: Bei einem Teilfehler kann Debug-Staging auf der Wegwerf-VM verbleiben: {remote_stage}"
+                )
+            if firewall_confirmed:
+                manual_firewall_final_reminder(target, source_cidr, arguments.ssh_port)
+        finally:
+            setup_signals.restore()
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    raw_arguments = list(sys.argv[1:] if argv is None else argv)
+    if not raw_arguments:
+        selected = choose_number(
+            "PBP - sicherer Browserzugang:",
+            (
+                "Neue disposable PBP-VM komplett einrichten",
+                "Vorhandene PBP-VM verbinden",
+            ),
+        )
+        raw_arguments = ["--setup" if selected == 0 else "--connect"]
+    arguments = build_parser().parse_args(raw_arguments)
+    if arguments.setup:
+        return run_setup(arguments)
+    return run_connect(arguments)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except UserError as error:
+        fail(str(error))
+    except SetupInterrupted as error:
+        fail(str(error), 128 + error.signum)
+    except KeyboardInterrupt:
+        fail("Einrichtung wurde am Terminal abgebrochen.", 130)

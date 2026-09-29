@@ -1,0 +1,109 @@
+//go:build linux
+
+package controlruntime
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	localPasswdPath     = "/etc/passwd"
+	maxLocalPasswdBytes = 2 << 20
+)
+
+func defaultSessionDependencies() SessionDependencies {
+	return SessionDependencies{
+		LookupEnvironment:  os.LookupEnv,
+		CurrentIdentity:    currentLocalSessionIdentity,
+		ReadActiveEnvelope: readRootOwnedActiveEnvelope,
+		Now:                time.Now,
+	}
+}
+
+func currentLocalSessionIdentity() (SessionIdentity, error) {
+	uid, effectiveUID := os.Getuid(), os.Geteuid()
+	if uid <= 0 || effectiveUID <= 0 || uid != effectiveUID {
+		return SessionIdentity{}, ErrSessionDenied
+	}
+	passwd, err := readProtectedFile("/", localPasswdPath, 0, 0, maxLocalPasswdBytes)
+	if err != nil {
+		return SessionIdentity{}, ErrSessionDenied
+	}
+	username, err := managementUsernameForUID(passwd, uid)
+	if err != nil {
+		return SessionIdentity{}, ErrSessionDenied
+	}
+	return SessionIdentity{Username: username, UID: uid, EffectiveUID: effectiveUID}, nil
+}
+
+func managementUsernameForUID(passwd []byte, uid int) (string, error) {
+	if uid <= 0 || len(passwd) == 0 || len(passwd) > maxLocalPasswdBytes {
+		return "", ErrSessionDenied
+	}
+	uidText := strconv.Itoa(uid)
+	matchingName, matchingUID := 0, 0
+	for _, line := range strings.Split(string(passwd), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, ":")
+		if len(fields) != 7 {
+			return "", ErrSessionDenied
+		}
+		if fields[0] == ManagementUser {
+			matchingName++
+			if fields[2] != uidText {
+				return "", ErrSessionDenied
+			}
+		}
+		if fields[2] == uidText {
+			matchingUID++
+			if fields[0] != ManagementUser {
+				return "", ErrSessionDenied
+			}
+		}
+	}
+	if matchingName != 1 || matchingUID != 1 {
+		return "", ErrSessionDenied
+	}
+	return ManagementUser, nil
+}
+
+func readRootOwnedActiveEnvelope(stateRoot string) ([]byte, error) {
+	if stateRoot != DefaultStateRoot || !safeAbsolutePath(stateRoot) {
+		return nil, ErrUnsafeHost
+	}
+	return readActiveEnvelopeAt("/", stateRoot, 0, 0)
+}
+
+func readActiveEnvelopeAt(anchor, stateRoot string, ownerUID, ownerGID uint32) ([]byte, error) {
+	if !safeAbsolutePath(anchor) || !safeAbsolutePath(stateRoot) ||
+		!pathInside(anchor, stateRoot) {
+		return nil, ErrUnsafeHost
+	}
+	activePath := filepath.Join(stateRoot, ActiveBundleName)
+	if filepath.Clean(activePath) != activePath || !pathInside(stateRoot, activePath) {
+		return nil, ErrUnsafeHost
+	}
+	active, err := openTrustedDirectory(anchor, activePath, false, ownerUID, ownerGID)
+	if err != nil {
+		return nil, ErrUnsafeHost
+	}
+	defer active.Close()
+	data, err := readManagedFileAt(
+		active,
+		"envelope.json",
+		0o444,
+		ownerUID,
+		ownerGID,
+		MaxEnvelopeBytes,
+	)
+	if err != nil {
+		return nil, ErrUnsafeHost
+	}
+	return data, nil
+}
