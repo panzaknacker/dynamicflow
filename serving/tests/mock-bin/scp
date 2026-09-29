@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+[ "${1:-}" = "--" ] && shift
+[ "$#" -eq 2 ] || {
+    echo "mock scp: expected SOURCE TARGET" >&2
+    exit 2
+}
+
+source_file="$1"
+case "$2" in
+download@mock:*) target_file="${2#download@mock:}" ;;
+*)
+    echo "mock scp: unexpected target: $2" >&2
+    exit 2
+    ;;
+esac
+
+cp "$source_file" "$target_file"

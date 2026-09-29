@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Toolkit serving-host expiry deadline
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=toolkit-expire.service
+
+[Install]
+WantedBy=timers.target

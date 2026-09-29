@@ -1,0 +1,12 @@
+{
+  "PreventInstalls": true,
+  "Remove": [
+    "Google",
+    "Bing",
+    "Amazon.com",
+    "eBay",
+    "Twitter",
+    "Wikipedia (en)"
+  ],
+  "Default": "DuckDuckGo"
+}

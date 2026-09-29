@@ -1,0 +1,23 @@
+[toolkit-mfa]
+enabled = true
+backend = polling
+filter = toolkit-mfa
+logpath = /var/log/caddy/toolkit-access.json
+port = http,https
+banaction = nftables-multiport
+maxretry = 3
+findtime = 10m
+bantime = 1h
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 1w
+usedns = no
+
+[sshd]
+enabled = true
+backend = systemd
+maxretry = 3
+findtime = 10m
+bantime = 1h
+bantime.increment = true
+bantime.maxtime = 1w

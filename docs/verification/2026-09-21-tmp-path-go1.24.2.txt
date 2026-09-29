@@ -1,0 +1,50 @@
+GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags '-s -w -buildid=' -o ".flow/bin/flow" ./cmd/flow
+GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0 go test -trimpath ./...
+?   	dynamicflow/cmd/flow	[no test files]
+ok  	dynamicflow/internal/application	0.318s
+ok  	dynamicflow/internal/applyplan	0.030s
+ok  	dynamicflow/internal/cli	9.107s
+ok  	dynamicflow/internal/controlinstalltransport	0.086s
+ok  	dynamicflow/internal/controlnodes	0.215s
+ok  	dynamicflow/internal/controlpolicy	0.008s
+ok  	dynamicflow/internal/controlruntime	0.056s
+ok  	dynamicflow/internal/controltransport	0.007s
+ok  	dynamicflow/internal/enrollment	0.672s
+ok  	dynamicflow/internal/instanceclient	0.271s
+ok  	dynamicflow/internal/instances	0.032s
+ok  	dynamicflow/internal/instanceunit	0.120s
+ok  	dynamicflow/internal/lab	0.019s
+ok  	dynamicflow/internal/localstate	0.007s
+ok  	dynamicflow/internal/netpolicy	0.012s
+ok  	dynamicflow/internal/operatortrust	0.011s
+ok  	dynamicflow/internal/profiles	0.007s
+ok  	dynamicflow/internal/reconcile	0.031s
+ok  	dynamicflow/internal/release	0.701s
+ok  	dynamicflow/internal/safeview	0.006s
+ok  	dynamicflow/internal/serving	0.968s
+ok  	dynamicflow/internal/servingruntime	0.006s
+ok  	dynamicflow/internal/signing	0.005s
+ok  	dynamicflow/internal/sshkeys	0.050s
+ok  	dynamicflow/internal/sshtransport	0.085s
+ok  	dynamicflow/internal/systemstate	0.044s
+ok  	dynamicflow/internal/targetapply	0.154s
+ok  	dynamicflow/internal/tlsutil	0.006s
+ok  	dynamicflow/internal/topology	0.009s
+ok  	dynamicflow/internal/tui	0.060s
+--- FAIL: TestRevealValidatesFormatModeAndLinks (0.00s)
+    vncsecret_linux_test.go:91: reveal="" err=unsafe VNC credential state
+--- FAIL: TestRotateAtomicallyUpdatesAllFilesAndModes (0.00s)
+    vncsecret_linux_test.go:144: rotate="" err=unsafe VNC credential state
+--- FAIL: TestRotatePartialCommitRollsBackVerifiedBytes (0.00s)
+    vncsecret_linux_test.go:205: events=[]
+--- FAIL: TestRotateServiceFailureRollsBackAndRestartsOldCredential (0.00s)
+    vncsecret_linux_test.go:230: value="" err=unsafe VNC credential state
+--- FAIL: TestRotateDetectsPathSwapAndLeavesServiceStopped (0.00s)
+    vncsecret_linux_test.go:257: <project-root>/internal/vncsecret/.vncsecret-test-1437120979/home/.vnc.swapped/passwd="" err=open <project-root>/internal/vncsecret/.vncsecret-test-1437120979/home/.vnc.swapped/passwd: no such file or directory want="OLDCRYPT"
+--- FAIL: TestRevealRejectsConcurrentCredentialOperation (0.00s)
+    vncsecret_linux_test.go:277: unsafe VNC credential state
+FAIL
+FAIL	dynamicflow/internal/vncsecret	0.006s
+ok  	dynamicflow/internal/workflow	0.007s
+FAIL
+make: *** [Makefile:17: test] Error 1

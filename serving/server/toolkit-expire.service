@@ -1,0 +1,15 @@
+[Unit]
+Description=Enforce Toolkit serving-host lifetime
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/toolkit-expire-host
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX

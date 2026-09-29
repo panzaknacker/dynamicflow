@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+[ "${1:-}" = "--" ] && shift
+[ "$#" -eq 2 ] || {
+    echo "mock ssh: expected TARGET COMMAND" >&2
+    exit 2
+}
+
+case "$1" in
+download@mock) ;;
+*)
+    echo "mock ssh: unexpected target: $1" >&2
+    exit 2
+    ;;
+esac
+
+exec sh -c "$2"

@@ -1,0 +1,207 @@
+{
+  "policies": {
+    "BlockAboutAddons": true,
+    "BlockAboutConfig": true,
+    "BlockAboutProfiles": true,
+    "DisableDeveloperTools": true,
+    "DisableSecurityBypass": {
+      "InvalidCertificate": true,
+      "SafeBrowsing": true
+    },
+    "DNSOverHTTPS": {
+      "Enabled": false,
+      "Locked": true
+    },
+    "Proxy": {
+      "Mode": "none",
+      "Locked": true
+    },
+    "InstallAddonsPermission": {
+      "Default": false
+    },
+    "ExtensionSettings": {
+      "*": {
+        "installation_mode": "blocked"
+      },
+      "uBlock0@raymondhill.net": {
+        "installation_mode": "allowed",
+        "updates_disabled": true
+      }
+    },
+    "HttpsOnlyMode": "force_enabled",
+    "NetworkPrediction": false,
+    "PopupBlocking": {
+      "Default": true,
+      "Locked": true
+    },
+    "PromptForDownloadLocation": true,
+    "Permissions": {
+      "Camera": {
+        "BlockNewRequests": true,
+        "Locked": true
+      },
+      "Location": {
+        "BlockNewRequests": true,
+        "Locked": true
+      },
+      "Microphone": {
+        "BlockNewRequests": true,
+        "Locked": true
+      },
+      "Notifications": {
+        "BlockNewRequests": true,
+        "Locked": true
+      }
+    },
+    "Preferences": {
+      "browser.download.useDownloadDir": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "browser.download.start_downloads_in_tmp_dir": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "browser.safebrowsing.blockedURIs.enabled": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "browser.safebrowsing.downloads.enabled": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "browser.safebrowsing.malware.enabled": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "browser.safebrowsing.phishing.enabled": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "browser.safebrowsing.allowOverride": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "camoufox.uBO.assetsBootstrapLocation": {
+        "Value": "",
+        "Status": "locked"
+      },
+      "devtools.debugger.prompt-connection": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "devtools.debugger.remote-enabled": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "dom.disable_open_during_load": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "dom.file.createInChild": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "dom.filesystem.pathcheck.disabled": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "dom.security.https_only_mode": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "extensions.blocklist.enabled": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "extensions.quarantinedDomains.enabled": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "focusmanager.testmode": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "network.cookie.cookieBehavior": {
+        "Value": 5,
+        "Status": "locked"
+      },
+      "network.dns.disablePrefetch": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "network.dns.disablePrefetchFromHTTPS": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "network.proxy.type": {
+        "Value": 0,
+        "Status": "locked"
+      },
+      "network.trr.mode": {
+        "Value": 5,
+        "Status": "locked"
+      },
+      "permissions.default.camera": {
+        "Value": 2,
+        "Status": "locked"
+      },
+      "permissions.default.desktop-notification": {
+        "Value": 2,
+        "Status": "locked"
+      },
+      "permissions.default.geo": {
+        "Value": 2,
+        "Status": "locked"
+      },
+      "permissions.default.microphone": {
+        "Value": 2,
+        "Status": "locked"
+      },
+      "privacy.partition.network_state": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "privacy.trackingprotection.enabled": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "security.enterprise_roots.enabled": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "security.certerror.hideAddException": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "security.fileuri.strict_origin_policy": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "security.notification_enable_delay": {
+        "Value": 1000,
+        "Status": "locked"
+      },
+      "vulpineos.actionlock.enabled": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "vulpineos.dom_export.enabled": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "vulpineos.injection_filter.enabled": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "vulpineos.sentinel.probe.enabled": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "vulpineos.trustwarm.enabled": {
+        "Value": false,
+        "Status": "locked"
+      }
+    }
+  }
+}

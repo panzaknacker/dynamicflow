@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "name": "vpn",
+  "description": "General Mullvad VPN mode with the normal Firefox workflow",
+  "installable": true,
+  "depends_on": ["ssh"],
+  "conflicts_with": ["examstation", "vpn-pbp-de"],
+  "components": ["vpn"]
+}

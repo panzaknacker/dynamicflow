@@ -1,0 +1,3 @@
+[Definition]
+# must outlive bantime.maxtime=1w so repeated bans survive daemon restarts.
+dbpurgeage = 8d

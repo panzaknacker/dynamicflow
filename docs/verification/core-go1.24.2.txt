@@ -1,0 +1,75 @@
+Actual local make check output, 2026-09-19, Linux amd64, Go 1.24.2.
+Repository path normalized for sharing. Process exit status: 0.
+
+GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags '-s -w -buildid=' -o ".flow/bin/flow" ./cmd/flow
+GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0 go test -trimpath ./...
+?   	dynamicflow/cmd/flow	[no test files]
+ok  	dynamicflow/internal/application	0.251s
+ok  	dynamicflow/internal/applyplan	0.038s
+ok  	dynamicflow/internal/cli	10.470s
+ok  	dynamicflow/internal/controlinstalltransport	0.085s
+ok  	dynamicflow/internal/controlnodes	0.159s
+ok  	dynamicflow/internal/controlpolicy	0.007s
+ok  	dynamicflow/internal/controlruntime	0.053s
+ok  	dynamicflow/internal/controltransport	0.004s
+ok  	dynamicflow/internal/enrollment	0.910s
+ok  	dynamicflow/internal/instanceclient	0.371s
+ok  	dynamicflow/internal/instances	0.040s
+ok  	dynamicflow/internal/instanceunit	0.244s
+ok  	dynamicflow/internal/lab	0.022s
+ok  	dynamicflow/internal/localstate	0.007s
+ok  	dynamicflow/internal/netpolicy	0.040s
+ok  	dynamicflow/internal/operatortrust	0.009s
+ok  	dynamicflow/internal/profiles	0.007s
+ok  	dynamicflow/internal/reconcile	0.052s
+ok  	dynamicflow/internal/release	1.195s
+ok  	dynamicflow/internal/safeview	0.004s
+ok  	dynamicflow/internal/serving	1.051s
+ok  	dynamicflow/internal/servingruntime	0.003s
+ok  	dynamicflow/internal/signing	0.006s
+ok  	dynamicflow/internal/sshkeys	0.049s
+ok  	dynamicflow/internal/sshtransport	0.065s
+ok  	dynamicflow/internal/systemstate	0.038s
+ok  	dynamicflow/internal/targetapply	0.118s
+ok  	dynamicflow/internal/tlsutil	0.007s
+ok  	dynamicflow/internal/topology	0.010s
+ok  	dynamicflow/internal/tui	0.085s
+ok  	dynamicflow/internal/vncsecret	0.214s
+ok  	dynamicflow/internal/workflow	0.009s
+GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=1 go test -race -trimpath ./...
+?   	dynamicflow/cmd/flow	[no test files]
+ok  	dynamicflow/internal/application	1.684s
+ok  	dynamicflow/internal/applyplan	1.211s
+ok  	dynamicflow/internal/cli	13.200s
+ok  	dynamicflow/internal/controlinstalltransport	1.101s
+ok  	dynamicflow/internal/controlnodes	1.444s
+ok  	dynamicflow/internal/controlpolicy	1.040s
+ok  	dynamicflow/internal/controlruntime	1.198s
+ok  	dynamicflow/internal/controltransport	1.020s
+ok  	dynamicflow/internal/enrollment	5.066s
+ok  	dynamicflow/internal/instanceclient	1.868s
+ok  	dynamicflow/internal/instances	1.043s
+ok  	dynamicflow/internal/instanceunit	1.178s
+ok  	dynamicflow/internal/lab	1.097s
+ok  	dynamicflow/internal/localstate	1.016s
+ok  	dynamicflow/internal/netpolicy	1.066s
+ok  	dynamicflow/internal/operatortrust	1.027s
+ok  	dynamicflow/internal/profiles	1.020s
+ok  	dynamicflow/internal/reconcile	1.097s
+ok  	dynamicflow/internal/release	9.904s
+ok  	dynamicflow/internal/safeview	1.013s
+ok  	dynamicflow/internal/serving	4.900s
+ok  	dynamicflow/internal/servingruntime	1.018s
+ok  	dynamicflow/internal/signing	1.016s
+ok  	dynamicflow/internal/sshkeys	1.050s
+ok  	dynamicflow/internal/sshtransport	1.109s
+ok  	dynamicflow/internal/systemstate	1.128s
+ok  	dynamicflow/internal/targetapply	1.737s
+ok  	dynamicflow/internal/tlsutil	1.064s
+ok  	dynamicflow/internal/topology	1.087s
+ok  	dynamicflow/internal/tui	1.337s
+ok  	dynamicflow/internal/vncsecret	1.543s
+ok  	dynamicflow/internal/workflow	1.039s
+GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0 go vet -trimpath ./...
+GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly FLOW_BIN="<repository>/.flow/bin/flow" ./tests/static-security.sh
+static-security: ok
