@@ -165,10 +165,7 @@ type deferredRuntimeSecret struct {
 }
 
 func commandInstanceRuntimeRaw(arguments []string, stdout, stderr io.Writer, jsonOutput bool) int {
-	command := "instance-runtime"
-	if len(arguments) != 0 {
-		command += "." + arguments[0]
-	}
+	command := requestedCommandID(append([]string{"instance-runtime"}, arguments...))
 	out := &emitter{json: jsonOutput, stdout: stdout, stderr: stderr, command: command}
 	return runInstanceRuntime(arguments, out, defaultInstanceRuntimeDependencies())
 }

@@ -25,7 +25,7 @@ case "${1:-}" in
 esac
 [[ "$#" -le 1 ]] || die "Usage: ${0##*/} [vX.Y.Z]"
 
-for source_file in bootstrap-vpn.sh README.md VERSION; do
+for source_file in bootstrap-vpn.sh VERSION; do
     [[ -f "$ROOT_DIR/$source_file" && ! -L "$ROOT_DIR/$source_file" ]] ||
         die "Missing or unsafe source file: $ROOT_DIR/$source_file"
 done
@@ -47,12 +47,11 @@ trap cleanup EXIT HUP INT TERM
 payload="$build_root/$PACKAGE_NAME"
 install -d -m 0755 "$payload"
 install -m 0755 "$ROOT_DIR/bootstrap-vpn.sh" "$payload/bootstrap-vpn.sh"
-install -m 0644 "$ROOT_DIR/README.md" "$payload/README.md"
 printf '%s\n' "$version" >"$payload/VERSION"
 chmod 0644 "$payload/VERSION"
 (
     cd "$payload"
-    sha256sum bootstrap-vpn.sh README.md VERSION >SHA256SUMS
+    sha256sum bootstrap-vpn.sh VERSION >SHA256SUMS
     sha256sum -c SHA256SUMS >/dev/null
 )
 chmod 0644 "$payload/SHA256SUMS"
@@ -63,7 +62,6 @@ chmod 0644 "$tar_tmp"
 
 expected_entries="$(printf '%s\n' \
     "$PACKAGE_NAME" \
-    "$PACKAGE_NAME/README.md" \
     "$PACKAGE_NAME/SHA256SUMS" \
     "$PACKAGE_NAME/VERSION" \
     "$PACKAGE_NAME/bootstrap-vpn.sh" | sort)"

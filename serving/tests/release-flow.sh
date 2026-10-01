@@ -65,8 +65,6 @@ if [[ -z "$artifact" ]]; then
     done
     install -m 0755 "${workspace_root}/vpn/bootstrap-vpn.sh" \
         "${fixture_root}/setup-mullvad.sh"
-    install -m 0644 "${workspace_root}/decepticon/decepticon-vm-datapack/README.md" \
-        "${fixture_root}/README.md"
     printf 'test fixture\n' >"${fixture_root}/decepticon-custom-vm.tar.gz"
     printf 'v9.9.0\n' >"${fixture_root}/VERSION"
     printf '%s\n' \
@@ -77,7 +75,7 @@ if [[ -z "$artifact" ]]; then
         cd "$fixture_root"
         sha256sum decepticon-custom-vm.tar.gz bootstrap-decepticon-vm.sh \
             setup-mullvad.sh troubleshoot-decepticon-vm.sh fix-terminal.sh \
-            fix-decepticon-postgres.sh VERSION BUILD_INFO README.md >SHA256SUMS
+            fix-decepticon-postgres.sh VERSION BUILD_INFO >SHA256SUMS
     )
     tar -czf "$artifact" -C "$fixture_parent" decepticon-vm-datapack
 fi

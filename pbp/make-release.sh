@@ -64,7 +64,7 @@ case "$DIST_ROOT" in /*) ;; *) die 'TOOLKIT_DIST_DIR must be absolute.' ;; esac
     die "Unsafe dist directory: $DIST_ROOT"
 
 for source in bootstrap-pbp.sh launch-pbp.py safe-extract.py \
-    browser-maintenance.py README.md CAMOUFOX-MAINTENANCE.md requirements.lock \
+    browser-maintenance.py requirements.lock \
     browser-assets.lock browser-security-policy.json browser-hardening-policy.json \
     browser-search-policy.json \
     VERSION apparmor/toolkit-pbp; do
@@ -134,9 +134,6 @@ install -m 0755 "$VPN_BOOTSTRAP" "$PAYLOAD/toolkit-vpn-stage"
 install -m 0755 "$ROOT_DIR/launch-pbp.py" "$PAYLOAD/launch-pbp.py"
 install -m 0755 "$ROOT_DIR/safe-extract.py" "$PAYLOAD/safe-extract.py"
 install -m 0755 "$ROOT_DIR/browser-maintenance.py" "$PAYLOAD/browser-maintenance.py"
-install -m 0644 "$ROOT_DIR/README.md" "$PAYLOAD/README.md"
-install -m 0644 "$ROOT_DIR/CAMOUFOX-MAINTENANCE.md" \
-    "$PAYLOAD/CAMOUFOX-MAINTENANCE.md"
 install -m 0644 "$ROOT_DIR/requirements.lock" "$PAYLOAD/requirements.lock"
 install -m 0644 "$ROOT_DIR/browser-assets.lock" "$PAYLOAD/browser-assets.lock"
 install -m 0644 "$ROOT_DIR/browser-security-policy.json" \

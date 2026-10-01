@@ -177,7 +177,6 @@ class BrowserMaintenanceTests(unittest.TestCase):
         self.assertIn('install -m 0755 "$ROOT_DIR/browser-maintenance.py"', script)
         self.assertIn('install -m 0644 "$ROOT_DIR/browser-security-policy.json"', script)
         self.assertIn('install -m 0644 "$ROOT_DIR/browser-hardening-policy.json"', script)
-        self.assertIn('install -m 0644 "$ROOT_DIR/CAMOUFOX-MAINTENANCE.md"', script)
 
 
 if __name__ == "__main__":

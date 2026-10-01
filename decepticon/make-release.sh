@@ -70,7 +70,6 @@ payload_files=(
     troubleshoot-decepticon-vm.sh
     fix-terminal.sh
     fix-decepticon-postgres.sh
-    README.md
 )
 for task_file in "${payload_files[@]}"; do
     [[ -f "$DATAPACK_SOURCE/$task_file" && ! -L "$DATAPACK_SOURCE/$task_file" ]] ||
@@ -83,7 +82,6 @@ unexpected="$({
         ! -name troubleshoot-decepticon-vm.sh \
         ! -name fix-terminal.sh \
         ! -name fix-decepticon-postgres.sh \
-        ! -name README.md \
         ! -name BUILD_INFO \
         ! -name SHA256SUMS \
         ! -name VERSION \
@@ -165,13 +163,13 @@ chmod 0644 "$stage_dir/BUILD_INFO" "$stage_dir/VERSION"
         troubleshoot-decepticon-vm.sh \
         fix-terminal.sh \
         fix-decepticon-postgres.sh \
-        VERSION BUILD_INFO README.md >SHA256SUMS
+        VERSION BUILD_INFO >SHA256SUMS
     sha256sum -c SHA256SUMS >/dev/null
 )
 chmod 0644 "$stage_dir/SHA256SUMS"
 
 expected_members="$(printf '%s\n' \
-    BUILD_INFO README.md SHA256SUMS VERSION bootstrap-decepticon-vm.sh \
+    BUILD_INFO SHA256SUMS VERSION bootstrap-decepticon-vm.sh \
     decepticon-custom-vm.tar.gz fix-decepticon-postgres.sh fix-terminal.sh \
     setup-mullvad.sh troubleshoot-decepticon-vm.sh | sort)"
 actual_members="$(find "$stage_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"

@@ -32,6 +32,27 @@ grep -Fq '[[ "$row_count" -eq 5 ]]' "$ROOT/server/publish-release-set-remote.sh"
 grep -Fq '[[ "$counter" -eq 5 ]]' "$ROOT/publish-release-set.sh" || die 'Local publisher does not enforce the five-artifact standard set'
 
 TMP="$(mktemp -d)"
+snapshot_fixture="$TMP/source-snapshot"
+mkdir -m 0755 "$snapshot_fixture"
+printf 'fixture source\n' >"$snapshot_fixture/VERSION"
+{
+    printf '%s\n' 'set -Eeuo pipefail'
+    sed -n '/^finish_source_snapshot()/,/^}/p' "$ROOT/snapshot-current-tools.sh"
+    printf '%s\n' 'finish_source_snapshot "$1" fixture'
+} >"$TMP/finish-snapshot.sh"
+(umask 077; bash "$TMP/finish-snapshot.sh" "$snapshot_fixture")
+[[ "$(stat -c '%a' "$snapshot_fixture/SNAPSHOT-ORIGIN")" == 644 ]] ||
+    die 'snapshot origin is not world-readable'
+[[ "$(wc -l <"$snapshot_fixture/SOURCE-MANIFEST.tsv")" -eq 2 ]] ||
+    die 'source manifest does not cover every source file exactly once'
+while IFS=$'\t' read -r mode digest path; do
+    [[ "$mode" == "$(stat -c '%a' "$snapshot_fixture/$path")" ]] ||
+        die 'source manifest records incorrect file permissions'
+    actual="$(sha256sum "$snapshot_fixture/$path")"
+    [[ "$digest" == "${actual%% *}" ]] ||
+        die 'source manifest records incorrect file contents'
+done <"$snapshot_fixture/SOURCE-MANIFEST.tsv"
+
 download_root="$TMP/downloads"
 mkdir -p "$download_root"
 

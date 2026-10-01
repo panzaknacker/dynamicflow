@@ -262,17 +262,17 @@ grep -Fq 'unauthorized fixed public key' internal/cli/release.go ||
     fail 'SSH v0.1.5 revocation reason is missing'
 grep -Fq '"-buildvcs=false"' internal/cli/release.go ||
     fail 'flow release artifacts may include non-reproducible VCS metadata'
-grep -Fq 'retainedReleaseHighWater(root, setsRoot, historyRoot, publicKey)' internal/release/release.go ||
+grep -Fq 'retainedReleaseHighWater(root, setsRoot, historyRoot, publicKey)' internal/release/publish.go ||
     fail 'local release publish no longer derives rollback high-water from retained signed sets'
-grep -Fq 'ensureManifestHistoryEntry(historyRoot, signed, publicKey)' internal/release/release.go ||
+grep -Fq 'ensureManifestHistoryEntry(historyRoot, signed, publicKey)' internal/release/publish.go ||
     fail 'release publish no longer persists signed generation/version tombstones'
-grep -Fq 'registerVersionBindings(versionHistory, signed.Manifest)' internal/release/release.go ||
+grep -Fq 'registerVersionBindings(versionHistory, signed.Manifest)' internal/release/publish.go ||
     fail 'release publish no longer enforces immutable component/version/target bindings'
 grep -Fq 'release.CheckPublishPolicy(*root, stage.Signed, publicKey)' internal/cli/release.go ||
     fail 'local release publish plan no longer checks retained destination policy'
 grep -Fq '"/v1/admin/releases/plan"' internal/cli/release.go internal/serving/server.go ||
     fail 'remote release publish plan no longer performs an authenticated policy preflight'
-grep -Fq 'stat.Nlink != 1' internal/release/release.go ||
+grep -Fq 'stat.Nlink != 1' internal/release/publish.go ||
     fail 'release path validation lost its single-link invariant'
 grep -Fq 'syscall.O_NOFOLLOW' internal/release/bundle.go ||
     fail 'release bundle staging lost descriptor no-follow protection'

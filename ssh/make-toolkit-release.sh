@@ -48,7 +48,7 @@ esac
 for source_file in \
     bootstrap-ssh.sh vm-bootstrap.sh connect-gui.sh \
     make-toolkit-release.sh tests/static-checks.sh \
-    README.md VERSION; do
+    VERSION; do
     path="$ROOT_DIR/$source_file"
     if [ ! -f "$path" ] || [ -L "$path" ]; then
         die "Missing or unsafe source file: $path"
@@ -79,7 +79,6 @@ install -d -m 0755 "$payload"
 install -m 0755 "$ROOT_DIR/bootstrap-ssh.sh" "$payload/bootstrap-ssh.sh"
 install -m 0755 "$ROOT_DIR/vm-bootstrap.sh" "$payload/vm-bootstrap.sh"
 install -m 0755 "$ROOT_DIR/connect-gui.sh" "$payload/connect-gui.sh"
-install -m 0644 "$ROOT_DIR/README.md" "$payload/README.md"
 printf '%s\n' "$version" >"$payload/VERSION"
 chmod 0644 "$payload/VERSION"
 
@@ -89,7 +88,7 @@ bash -n "$payload/connect-gui.sh"
 
 (
     cd "$payload"
-    sha256sum bootstrap-ssh.sh vm-bootstrap.sh connect-gui.sh README.md VERSION >SHA256SUMS
+    sha256sum bootstrap-ssh.sh vm-bootstrap.sh connect-gui.sh VERSION >SHA256SUMS
     sha256sum -c SHA256SUMS >/dev/null
 )
 chmod 0644 "$payload/SHA256SUMS"
@@ -102,7 +101,6 @@ expected_entries="$(printf '%s\n' \
     "$PACKAGE_NAME" \
     "$PACKAGE_NAME/bootstrap-ssh.sh" \
     "$PACKAGE_NAME/connect-gui.sh" \
-    "$PACKAGE_NAME/README.md" \
     "$PACKAGE_NAME/SHA256SUMS" \
     "$PACKAGE_NAME/VERSION" \
     "$PACKAGE_NAME/vm-bootstrap.sh" | sort)"
