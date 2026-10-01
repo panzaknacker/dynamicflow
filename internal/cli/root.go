@@ -192,27 +192,34 @@ func requestedCommandID(arguments []string) string {
 	switch arguments[0] {
 	case "help", "--help", "-h":
 		return "help"
-	case "instance":
-		if len(arguments) < 2 {
-			return "instance"
-		}
-		if len(arguments) >= 3 && (arguments[1] == "hostkey" || arguments[1] == "key" || arguments[1] == "secret") {
-			return strings.Join(arguments[:3], ".")
-		}
-		return strings.Join(arguments[:2], ".")
 	case "instance-runtime":
-		if len(arguments) < 2 {
-			return "instance-runtime"
+		if len(arguments) >= 2 {
+			switch arguments[1] {
+			case "enroll", "reconcile", "status", "secret":
+				return "instance-runtime." + arguments[1]
+			}
 		}
-		return strings.Join(arguments[:2], ".")
-	case "system", "control", "serving", "start", "status", "logs", "key", "profile", "release", "enroll", "test":
-		if len(arguments) < 2 {
-			return arguments[0]
-		}
-		return strings.Join(arguments[:2], ".")
-	default:
+		return "instance-runtime"
+	case "dashboard", "tui", "serve":
 		return arguments[0]
 	}
+	group := arguments[0]
+	if _, known := commandGroupHelpText[group]; !known {
+		return "flow"
+	}
+	for length := min(len(arguments), 3); length >= 2; length-- {
+		command := strings.Join(arguments[:length], ".")
+		if _, known := commandLeafHelpGroups[command]; known {
+			return command
+		}
+	}
+	if group == "instance" && len(arguments) >= 2 {
+		switch arguments[1] {
+		case "hostkey", "key", "secret":
+			return "instance." + arguments[1]
+		}
+	}
+	return group
 }
 
 func emitHelp(emit *emitter, topic, text string) int {

@@ -222,7 +222,7 @@ func TestLeafHelpDoesNotCaptureUnknownCommandsOrRemoteArguments(t *testing.T) {
 			t.Fatalf("unknown leaf status=%d stdout=%q stderr=%q", status, stdout, stderr)
 		}
 		envelope := decodeCLIEnvelope(t, stderr)
-		if envelope.OK || envelope.Command != "release.nope" || envelope.Error == nil || envelope.Error.Code != "usage" {
+		if envelope.OK || envelope.Command != "release" || envelope.Error == nil || envelope.Error.Code != "usage" {
 			t.Fatalf("unknown leaf envelope = %+v", envelope)
 		}
 	})
@@ -362,7 +362,7 @@ func TestJSONSuccessAndFailureUseSingleDocument(t *testing.T) {
 		t.Fatalf("failure status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 	failure := decodeCLIEnvelope(t, stderr)
-	if failure.OK || failure.Command != "unknown" || failure.Error == nil || failure.Error.Code != "usage" || failure.Error.Next != "Run flow --help." {
+	if failure.OK || failure.Command != "flow" || failure.Error == nil || failure.Error.Code != "usage" || failure.Error.Next != "Run flow --help." {
 		t.Fatalf("failure envelope = %+v", failure)
 	}
 }
