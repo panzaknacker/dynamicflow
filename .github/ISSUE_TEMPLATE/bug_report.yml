@@ -1,0 +1,35 @@
+name: Fehler melden
+description: Ein reproduzierbares Problem mit synthetischen Daten melden.
+title: 'Fehler: '
+body:
+- type: markdown
+  attributes:
+    value: Sensible Sicherheitsbefunde zuerst gemäß [SECURITY.md](https://github.com/panzaknacker/dynamicflow/blob/main/SECURITY.md)
+      melden.
+- type: input
+  id: revision
+  attributes:
+    label: Commit und Umgebung
+    description: Commit-SHA, Betriebssystem und Go-Version.
+  validations:
+    required: true
+- type: textarea
+  id: reproduction
+  attributes:
+    label: Schritte zur Reproduktion
+    description: Ein kleines Beispiel mit synthetischen Daten und isolierter Testumgebung
+      angeben.
+  validations:
+    required: true
+- type: textarea
+  id: result
+  attributes:
+    label: Erwartetes und tatsächliches Ergebnis
+  validations:
+    required: true
+- type: textarea
+  id: output
+  attributes:
+    label: Relevante Ausgabe
+    description: Schlüssel, echte Inhalte und persönliche Kennungen vor dem Teilen
+      entfernen.

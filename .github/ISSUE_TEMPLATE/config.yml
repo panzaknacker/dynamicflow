@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+- name: Sicherheitsmeldungen
+  url: https://github.com/panzaknacker/dynamicflow/security/policy
+  about: Vor sensiblen Meldungen die Sicherheitsrichtlinie lesen.

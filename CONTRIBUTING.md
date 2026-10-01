@@ -1,25 +1,29 @@
 # Beiträge
 
-Mit dem [Entwicklungsleitfaden](docs/DEVELOPMENT.md) und dem
-[Projektstatus](PROJECT_STATUS.md) beginnen. Beiträge fokussiert halten und das
-beobachtbare Verhalten, die betroffene Sicherheitsgrenze und die ausgeführten
-Prüfungen erläutern.
+Mit [Entwicklungsleitfaden](docs/DEVELOPMENT.md) und [PROJECT_STATUS.md](PROJECT_STATUS.md) beginnen.
+Änderungen fokussiert halten und Problem, Verhalten sowie betroffene
+Vertrauensgrenzen erläutern.
 
-Bei Änderungen am Go-Kern `make check` ausführen. Geänderte Go-Dateien mit
-`gofmt` formatieren. Bei Änderungen an Komponentenskripten die passende lokale
-Komponentenprüfung ausführen. Änderungen an Signaturen, Vertrauen, Enrollment
-oder Dateisystemrechten brauchen gezielte Regressionstests für abgelehnte
-Eingaben ebenso wie für den vorgesehenen Weg.
+## Lokale Prüfung
 
-Keine erzeugten Binaries, privaten Zustand, Zugangsdaten, echten Inventare,
-Vendor-Archive oder ohne Lizenzhinweise kopierten Fremdquellcode committen.
-Synthetische Fixtures verwenden. Sicherheitsprobleme vertraulich melden, wie in
-[SECURITY.md](SECURITY.md) beschrieben.
+Bei Änderungen am Go-Kern `make check` und für den lokalen Einstieg `make demo`
+ausführen. Linux, Go gemäß `go.mod`, GNU Make, Bash, OpenSSH und C-Compiler
+bereitstellen. VNC-Prüfungen brauchen sichere übergeordnete Checkout-Verzeichnisse.
 
-Unfertiges Verhalten in codenahen Meldungen und in der Dokumentation als
-**in Entwicklung** gekennzeichnet lassen. Nachweise aus simulierten, lokalen
-und echten Umgebungen getrennt beschreiben. Ein grüner Kerntest rechtfertigt
-keine Aussage über Produktionsreife.
+Tatsächlich ausgeführte Befehle, Umgebung, Ergebnisse und übersprungene Checks
+festhalten. Geänderte Go-Dateien mit `gofmt` formatieren. Verhaltensänderungen
+brauchen gezielte Regressionen für Fehlerfälle und abgelehnte Eingaben.
 
-Beiträge erfolgen unter der Apache-2.0-Lizenz des Repositorys. Bestehende
-Urheberrechts- und Drittanbieterhinweise erhalten.
+## Anforderungen an Beiträge
+
+Ausdrückliche Freigaben, geprüftes Vertrauen, Fehlerbehandlung und Recovery-Grenzen
+erhalten. Ändert sich eine Fähigkeit oder ihre Abnahme, den Projektstatus anpassen.
+Lokale, simulierte und echte Betriebsnachweise getrennt benennen.
+
+Synthetische Fixtures verwenden. Keine Binaries, privaten Zustände, Zugangsdaten,
+echten Inventare oder Fremdquellen ohne Lizenzhinweise committen.
+Sensible Befunde über [SECURITY.md](SECURITY.md) melden.
+
+## Quellbedingungen
+
+Für Beiträge gilt die bestehende [Apache-2.0-Lizenz](LICENSE).

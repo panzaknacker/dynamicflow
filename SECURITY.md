@@ -2,20 +2,21 @@
 
 ## Unterstützungsstatus
 
-Dynamicflow ist in Entwicklung und nicht produktionsfreigegeben. Es gibt noch
-keine unterstützte Version.
+Entwicklungsstand ohne unterstützte Produktionsversion.
 
-## Sicherheitslücken melden
+## Schwachstellen melden
 
-Keine Schwachstelle mit echten Schlüsseln, .flow-Inhalten, Hostinventaren oder
-Release-State als öffentliches Issue melden. Wenn aktiviert, GitHubs private
-Vulnerability-Reporting-Funktion verwenden; andernfalls zuerst den Maintainer
-über sein GitHub-Profil kontaktieren.
+Wenn verfügbar, GitHubs private Schwachstellenmeldung im **Security**-Tab
+verwenden. Ist dieser Kanal nicht verfügbar, ein Issue nur mit der Bitte um
+einen privaten Meldekanal eröffnen, ohne technische Schwachstellendetails.
+Private Reviewer können ihren bereits vereinbarten Kontaktkanal verwenden.
 
-Berichte sollten Commit, betroffene Trust-Grenze, erwartete Signatur- oder
-Pin-Prüfung und eine minimale Reproduktion mit Wegwerf-VMs enthalten.
+Keine private Schlüssel, FLOW_HOME-Zustand, Hostinventare oder Release-State in öffentlichen Issues teilen.
+Den betroffenen Commit, die Komponente, verletzte Vertrauensgrenze, erwartetes
+Verhalten und eine minimale Reproduktion mit synthetischen Daten im privaten
+Bericht angeben. Es gibt keine garantierte Antwortzeit oder Security-SLA.
 
-## Testgrenze
+## Evaluierungsgrenzen
 
-Nur ausdrücklich als disposable markierte eigene Systeme verwenden. E2E- und
-Soak-Läufe dürfen keine fremden oder produktiven Hosts verändern.
+Integrationen nur mit eigenen entbehrlichen VMs prüfen. Die unfertige Control-Route
+bleibt gesperrt; Kernprüfungen qualifizieren keinen Mehr-VM-Betrieb.

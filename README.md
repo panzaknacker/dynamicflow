@@ -1,74 +1,79 @@
-# Dynamicflow
+# dynamicflow
 
-Dynamicflow entstand, weil ich für eigene offensive Security Research zwischen
-Hosting-Anbietern wechsle und VMs und Nodes nicht jedes Mal neu vorbereiten
-wollte. Auch die Kosten waren ein Grund für diese Wechsel. Das Werkzeug bündelt
-wiederverwendbare Linux-VM-Profile für Labs und autorisierte Tests.
+Wiederverwendbare Linux-VM-Profile für Research und autorisierte Security-Labs.
+Die Go-Control-Plane löst Komponentenabhängigkeiten auf, prüft signierte Releases
+und verwaltet gewünschte Instanzzustände.
 
-Die Go-Control-Plane verwaltet Profile, signierte Releases und gewünschte
-Instanzzustände. Release-, Desired-State- und Control-Signaturen verwenden
-getrennte Schlüssel.
+Das Projekt entstand, um ähnliche VM- und Node-Konfigurationen beim Wechsel
+von Hosting-Anbietern wiederzuverwenden. Private Varianten habe ich für eigene
+Research eingesetzt; ihre genaue Zuordnung zu diesem Snapshot ist noch offen.
 [Hintergrund und Entscheidungen](docs/PORTFOLIO.md).
 
-## Stand dieses Repositorys
+**In Entwicklung.** Der lokale Go-Kern ist zur Evaluierung verfügbar.
+Entfernter Lebenszyklus, Enrollment und Serving bleiben mit
+`control_route_unavailable` gesperrt, solange die neue Control-Route unvollständig ist.
+[Umfang und offene Arbeit](PROJECT_STATUS.md).
 
-**In Entwicklung.** Der lokale Go-Kern lässt sich bauen und testen. Die neue
-Control-Route ist unvollständig; entfernte Lifecycle-Aktionen, Enrollment und
-Serving-Betrieb sind derzeit mit `control_route_unavailable` gesperrt.
+## Lokal ausprobieren
 
-## Lokal ansehen
+Voraussetzungen: Linux, Bash, GNU Make, OpenSSH (`ssh`, `ssh-keygen`) und Go
+gemäß [go.mod](go.mod). Der erste Build kann Go-Module herunterladen.
 
 ```sh
 make demo
 ```
 
-Die Demo baut die CLI, legt temporären State an, zeigt Profile und prüft
-Signaturen sowie die Remote-Sperre. Benötigt werden Linux, Bash, GNU Make,
-Go gemäß `go.mod` und OpenSSH (`ssh`, `ssh-keygen`). Beim ersten Build können
-Go-Module geladen werden. [Ablauf und Fehlerhilfe](docs/DEMO.md).
+Die Demo baut die CLI, erzeugt temporären Zustand, zeigt Profile, prüft
+Signaturen und bestätigt die erwartete Remote-Sperre. Kein Cloud-Konto oder
+bereitgestellte VM erforderlich. [Ablauf und Fehlerhilfe](docs/DEMO.md).
 
-Für den vollständigen Kerncheck wird zusätzlich ein C-Compiler benötigt:
+Für die vollständige Kernprüfung zusätzlich einen C-Compiler bereitstellen:
 
 ```sh
 make check
 ```
 
-Das umfasst Build, Unit- und Race-Tests, `go vet` und statische
-Sicherheitsprüfungen. [Prüfergebnisse](docs/VERIFICATION.md).
+Der Lauf umfasst Build, Unit- und Race-Tests, `go vet` und statische
+Sicherheitsprüfungen. VNC-Tests verlangen einen Checkout ohne gruppen- oder
+weltweit beschreibbare übergeordnete Verzeichnisse; `/tmp` erfüllt diese Bedingung nicht.
 
-## Aufbau
+## Code-Einstiege
 
-- `flow` ist die CLI für Profile, Schlüssel und Instanzzustände.
-- `serving` verteilt signierte, unveränderliche Release-Sets und Desired State.
-- SSH, VPN und PBP liefern die mitgelieferten Komponentenskripte.
-- `examstation` ist nur deklariert; der Quellcode fehlt. `decepticon` bleibt eine
-  externe Integration. Beide sind im Target-Runner nicht freigegeben.
+| Bereich | Code | Entscheidung |
+| --- | --- | --- |
+| Profile | [Auflösung](internal/cli/profile.go) · [Definitionen](profiles/) | Abhängigkeiten vor einer Änderung auflösen. |
+| Signaturen | [Signieren](internal/signing/) · [Release-Prüfung](internal/release/) | Release, Soll-Zustand und Control verwenden getrennte Vertrauenswurzeln. |
+| Remote-Grenze | [Control-Sperre](internal/cli/control_route_gate.go) | Unfertige Aktionen vor Zustands-, Netzwerk- oder Prozesszugriff ablehnen. |
+| Verteilung | [Serving](serving/) | Verteilung und vollständigen Betrieb getrennt qualifizieren. |
 
-Der vollständige Plattformablauf braucht zusätzliche Inputs, die fertige
-Control-Route und eine Mehr-VM-Abnahme. Umfang und offene Arbeiten stehen in
-[PROJECT_STATUS.md](PROJECT_STATUS.md) und der
-[Abnahmematrix](docs/COMPLETION-AUDIT.md).
+`examstation` ist deklariert, sein Quellcode fehlt. `decepticon` ist eine externe
+Integration. Beide bleiben im Target-Runner gesperrt. Komponentenabnahme und
+vollständiger Plattform-Release liegen außerhalb von `make check`.
 
-## Sicherheitsgrenzen
+## Nachweise und Grenzen
 
-Release-, Desired-State- und Control-Keys sind getrennte Vertrauenswurzeln.
+Die protokollierten September-Läufe bestanden Demo und Kerncheck mit Go 1.24.2
+und 1.26.8: 32 Testpakete normal und mit Race-Detector sowie vet und statische
+Prüfungen. [Befehle und Umgebung](docs/VERIFICATION.md).
+[Aktuelle lokale Nachprüfung](docs/LOCAL-REVIEW-2026-10-01.md).
+
 `FLOW_HOME` enthält private Schlüssel, Trust-Pins und Auditdaten und bleibt
-außerhalb von Git. SSH-Hostkeys werden unabhängig geprüft und gepinnt;
-`ssh-keyscan` allein genügt nicht. VNC bleibt auf Loopback.
+außerhalb von Git. SSH-Hostkeys unabhängig prüfen; `ssh-keyscan` allein stellt
+kein Vertrauen her. VNC bleibt auf Loopback. Control-Route, Mehr-VM-Lebenszyklus
+und Recovery benötigen weitere Abnahme. [Threat Model](docs/THREAT-MODEL.md).
 
-[Threat Model](docs/THREAT-MODEL.md) und [Sicherheitsmeldungen](SECURITY.md).
+Die [GitHub-Workflows](https://github.com/panzaknacker/dynamicflow/actions)
+sind von lokalen Ergebnissen getrennt. Der aktuelle
+[CI-Startfehler](docs/HOSTED-CI.md) ist dokumentiert.
 
 ## Dokumentation
 
-- [Lokale Demo](docs/DEMO.md) und [Projektprofil](docs/PORTFOLIO.md)
-- [Entwicklung und Build](docs/DEVELOPMENT.md)
-- [Architektur](docs/adr/0001-platform-control-plane.md)
-- [Geplanter Betriebsablauf](docs/QUICKSTART.md) und [Runbook](docs/OPERATOR-RUNBOOK.md)
-- [Wiederherstellung](docs/RECOVERY-RUNBOOK.md)
-- [VM-Lab](docs/LAB-E2E-RUNBOOK.md) und [PBP-Untersuchung](docs/PBP-INCIDENT.md)
-- [Beiträge](CONTRIBUTING.md)
+- [Demo](docs/DEMO.md) · [Prüfstand](docs/VERIFICATION.md) · [Projektstatus](PROJECT_STATUS.md)
+- [Entwicklung](docs/DEVELOPMENT.md) · [Architektur](docs/adr/0001-platform-control-plane.md)
+- [Betrieb](docs/OPERATOR-RUNBOOK.md) · [Recovery](docs/RECOVERY-RUNBOOK.md)
+- [Abnahmematrix](docs/COMPLETION-AUDIT.md) · [VM-Lab](docs/LAB-E2E-RUNBOOK.md)
+- [Beiträge](CONTRIBUTING.md) · [Sicherheitsmeldungen](SECURITY.md)
 
 ## Lizenz
 
-[Apache License 2.0](LICENSE). Hinweise zu Drittanbieterkomponenten bleiben
-in den jeweiligen Unterverzeichnissen erhalten.
+[Apache License 2.0](LICENSE). Drittanbieterhinweise bleiben erhalten.
