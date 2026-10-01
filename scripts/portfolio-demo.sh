@@ -20,7 +20,7 @@ cd -- "$demo_repo_root"
 demo_go="${GO:-go}"
 for demo_tool in "$demo_go" make ssh ssh-keygen; do
     command -v "$demo_tool" >/dev/null || {
-        printf 'Missing prerequisite: %s\nSee docs/DEMO.md.\n' "$demo_tool" >&2
+        printf 'Missing prerequisite: %s\nRun scripts/portfolio-demo.sh --help for prerequisites.\n' "$demo_tool" >&2
         exit 1
     }
 done

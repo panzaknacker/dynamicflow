@@ -45,7 +45,7 @@ component-static:
 	./serving/tests/release-flow.sh
 
 optional-component-static:
-	@test -x examstation/tests/static-checks.sh && test -x examstation/tests/test-sshd-policy.sh || { printf '%s\n' 'Examstation integration is in development; its source and checks are not shipped. See docs/DEVELOPMENT.md.' >&2; exit 1; }
+	@test -x examstation/tests/static-checks.sh && test -x examstation/tests/test-sshd-policy.sh || { printf '%s\n' 'Examstation integration is in development; its source and checks are not shipped.' >&2; exit 1; }
 	./examstation/tests/static-checks.sh
 	./examstation/tests/test-sshd-policy.sh
 

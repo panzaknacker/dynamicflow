@@ -1,5 +1,0 @@
-ShellCheck 0.11.0
-Command: shellcheck -x scripts/portfolio-demo.sh
-
-
-Exit: 0

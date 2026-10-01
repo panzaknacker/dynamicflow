@@ -61,6 +61,7 @@ finish_source_snapshot() {
     {
         printf 'origin=%s\n' "$origin"
     } >"$destination/SNAPSHOT-ORIGIN"
+    chmod 0644 "$destination/SNAPSHOT-ORIGIN"
     (
         cd "$destination"
         find . -type f ! -name SOURCE-MANIFEST.tsv -printf '%m\t%P\0' |
@@ -70,7 +71,7 @@ finish_source_snapshot() {
                 printf '%s\t%s\t%s\n' "$mode" "${hash%% *}" "$path"
             done >SOURCE-MANIFEST.tsv
     )
-    chmod 0644 "$destination/SNAPSHOT-ORIGIN" "$destination/SOURCE-MANIFEST.tsv"
+    chmod 0644 "$destination/SOURCE-MANIFEST.tsv"
 }
 
 install_immutable_tree() {
@@ -174,16 +175,22 @@ vpn_snapshot="$HERE/sources/vpn/$vpn_version"
 pbp_snapshot="$HERE/sources/pbp/$pbp_version"
 install -d -m 0755 "$ssh_source_stage" "$vpn_source_stage" "$pbp_source_stage" "$decepticon_source_stage"
 
-for file in bootstrap-ssh.sh vm-bootstrap.sh connect-gui.sh make-toolkit-release.sh README.md VERSION tests/static-checks.sh; do
+for file in bootstrap-ssh.sh vm-bootstrap.sh connect-gui.sh make-toolkit-release.sh VERSION tests/static-checks.sh; do
     copy_source_file "$SSH_SOURCE" "$file" "$ssh_source_stage"
 done
-for file in bootstrap-vpn.sh make-release.sh README.md VERSION tests/static-checks.sh tests/prompt-login-harness.sh tests/pty-account.py tests/render-config-harness.sh; do
+for file in bootstrap-vpn.sh make-release.sh VERSION tests/static-checks.sh tests/prompt-login-harness.sh tests/pty-account.py tests/render-config-harness.sh; do
     copy_source_file "$VPN_SOURCE" "$file" "$vpn_source_stage"
 done
-for file in bootstrap-pbp.sh launch-pbp.py safe-extract.py make-release.sh fetch-vendor.sh README.md VERSION requirements.in requirements.lock browser-assets.lock browser-search-policy.json apparmor/toolkit-pbp tests/static-checks.sh tests/check_requirements.py tests/test_launcher.py tests/test_safe_extract.py; do
+for file in bootstrap-pbp.sh launch-pbp.py safe-extract.py browser-maintenance.py pbp-m \
+    make-release.sh fetch-vendor.sh VERSION requirements.in requirements.lock \
+    browser-assets.lock browser-security-policy.json browser-hardening-policy.json \
+    browser-search-policy.json apparmor/toolkit-pbp tests/static-checks.sh \
+    tests/check_requirements.py tests/test_launcher.py tests/test_safe_extract.py \
+    tests/pbp-vm-soak.py tests/test_vm_soak.py tests/test_browser_maintenance.py \
+    tests/test_pbp_m.py; do
     copy_source_file "$PBP_SOURCE" "$file" "$pbp_source_stage"
 done
-for file in VERSION make-release.sh decepticon-vm-datapack/bootstrap-decepticon-vm.sh decepticon-vm-datapack/troubleshoot-decepticon-vm.sh decepticon-vm-datapack/fix-terminal.sh decepticon-vm-datapack/fix-decepticon-postgres.sh decepticon-vm-datapack/README.md; do
+for file in VERSION make-release.sh decepticon-vm-datapack/bootstrap-decepticon-vm.sh decepticon-vm-datapack/troubleshoot-decepticon-vm.sh decepticon-vm-datapack/fix-terminal.sh decepticon-vm-datapack/fix-decepticon-postgres.sh; do
     copy_source_file "$DECEPTICON_SOURCE" "$file" "$decepticon_source_stage"
 done
 finish_source_snapshot "$ssh_source_stage" "$(snapshot_origin_for "$ssh_snapshot" "ssh")"

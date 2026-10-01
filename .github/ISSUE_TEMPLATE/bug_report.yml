@@ -4,7 +4,7 @@ title: 'Fehler: '
 body:
 - type: markdown
   attributes:
-    value: Sensible Sicherheitsbefunde zuerst gemäß [SECURITY.md](https://github.com/panzaknacker/dynamicflow/blob/main/SECURITY.md)
+    value: Sensible Sicherheitsbefunde zuerst gemäß [README](https://github.com/panzaknacker/dynamicflow#sicherheit)
       melden.
 - type: input
   id: revision

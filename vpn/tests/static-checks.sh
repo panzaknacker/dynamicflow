@@ -80,7 +80,7 @@ grep -Fq 'mullvad_cmd relay set location "$location"' \
     "$ROOT_DIR/bootstrap-vpn.sh"
 grep -Fq '.mullvad_exit_ip == true and .country == "Germany"' \
     "$ROOT_DIR/bootstrap-vpn.sh"
-grep -Fq 'any|de)' "$ROOT_DIR/bootstrap-vpn.sh"
+grep -Eq 'any[[:space:]]*\|[[:space:]]*de\)' "$ROOT_DIR/bootstrap-vpn.sh"
 grep -Fq 'configure_mullvad_network "$location"' "$ROOT_DIR/bootstrap-vpn.sh"
 grep -Fq 'connect_and_lock_mullvad "$admin_user" "$location" "$install_firefox"' \
     "$ROOT_DIR/bootstrap-vpn.sh"
@@ -118,7 +118,7 @@ grep -Fq \
     "$ROOT_DIR/bootstrap-vpn.sh"
 grep -Fq 'dpkg-statoverride --update --add root "$MULLVAD_GROUP" 0750' \
     "$ROOT_DIR/bootstrap-vpn.sh"
-grep -Fq 'sudo|wheel|docker|lxd|lxd-admin|incus|incus-admin|libvirt|disk|kvm' \
+grep -Eq 'sudo *\| *wheel *\| *docker *\| *lxd *\| *lxd-admin *\| *incus *\| *incus-admin *\| *libvirt *\| *disk *\| *kvm' \
     "$ROOT_DIR/bootstrap-vpn.sh"
 grep -Fq 'runuser -u malwarelab -- test -w /var/run/docker.sock' \
     "$ROOT_DIR/bootstrap-vpn.sh"
@@ -132,19 +132,19 @@ grep -Fq 'timeout --kill-after=10s 60s /usr/bin/snap run firefox' \
 [[ "$(grep -Fc '/usr/bin/timeout --foreground 20s /usr/bin/mullvad lockdown-mode set off' \
     "$ROOT_DIR/bootstrap-vpn.sh")" -eq 2 ]]
 safe_state_line="$(
-    awk '/^  secure_preexisting_mullvad$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
+    awk '/^[[:space:]]+secure_preexisting_mullvad$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
 )"
 base_package_line="$(
-    awk '/^  install_base_packages "\$PLATFORM_ID" "\$install_firefox"$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
+    awk '/^[[:space:]]+install_base_packages "\$PLATFORM_ID" "\$install_firefox"$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
 )"
 ssh_bypass_line="$(
-    awk '/^  install_ssh_bypass$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
+    awk '/^[[:space:]]+install_ssh_bypass$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
 )"
 mullvad_package_line="$(
-    awk '/^  install_mullvad "\$PLATFORM_ARCH"$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
+    awk '/^[[:space:]]+install_mullvad "\$PLATFORM_ARCH"$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
 )"
 connect_call_line="$(
-    awk '/^  connect_and_lock_mullvad "\$admin_user" "\$location" "\$install_firefox"$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
+    awk '/^[[:space:]]+connect_and_lock_mullvad "\$admin_user" "\$location" "\$install_firefox"$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh"
 )"
 [[ -n "$safe_state_line" && -n "$base_package_line" &&
     "$safe_state_line" -lt "$base_package_line" ]] || {
@@ -158,15 +158,15 @@ connect_call_line="$(
     exit 1
 }
 
-arm_line="$(awk '/^  arm_rollback_watchdog$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
+arm_line="$(awk '/^[[:space:]]+arm_rollback_watchdog$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
 connect_line="$(awk '/timeout --foreground 120s \/usr\/bin\/mullvad connect --wait/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
-lockdown_line="$(awk '/^  mullvad_cmd lockdown-mode set on/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
-auto_line="$(awk '/^  mullvad_cmd auto-connect set on/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
-disarm_line="$(awk '/^  disarm_rollback_watchdog$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
+lockdown_line="$(awk '/^[[:space:]]+mullvad_cmd lockdown-mode set on/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
+auto_line="$(awk '/^[[:space:]]+mullvad_cmd auto-connect set on/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
+disarm_line="$(awk '/^[[:space:]]+disarm_rollback_watchdog$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
 flow_line="$(awk '/^[[:space:]]+verify_bidirectional_ssh_flow$/ { print NR; exit }' "$ROOT_DIR/bootstrap-vpn.sh")"
 post_disarm_state_line="$(
     awk -v start="$disarm_line" \
-        'NR > start && /^  verify_final_mullvad_state$/ { print NR; exit }' \
+        'NR > start && /^[[:space:]]+verify_final_mullvad_state$/ { print NR; exit }' \
         "$ROOT_DIR/bootstrap-vpn.sh"
 )"
 [[ "$arm_line" -lt "$connect_line" && "$connect_line" -lt "$lockdown_line" &&
@@ -245,7 +245,7 @@ TOOLKIT_DIST_DIR="$dist_one" "$ROOT_DIR/make-release.sh" >/dev/null
 TOOLKIT_DIST_DIR="$dist_two" "$ROOT_DIR/make-release.sh" >/dev/null
 cmp -s "$dist_one/vpn.tar.gz" "$dist_two/vpn.tar.gz"
 
-expected_entries=$'toolkit-vpn\ntoolkit-vpn/README.md\ntoolkit-vpn/SHA256SUMS\ntoolkit-vpn/VERSION\ntoolkit-vpn/bootstrap-vpn.sh'
+expected_entries=$'toolkit-vpn\ntoolkit-vpn/SHA256SUMS\ntoolkit-vpn/VERSION\ntoolkit-vpn/bootstrap-vpn.sh'
 actual_entries="$(tar -tzf "$dist_one/vpn.tar.gz" | sed 's#/$##' | awk 'NF' | sort)"
 [[ "$actual_entries" == "$expected_entries" ]]
 if tar -tvzf "$dist_one/vpn.tar.gz" | awk '$1 !~ /^[d-]/ { bad = 1 } END { exit bad ? 0 : 1 }'; then
@@ -264,7 +264,7 @@ mkdir "$extract_dir"
     sha256sum -c SHA256SUMS >/dev/null
 )
 [[ "$(stat -c '%a' "$extract_dir/toolkit-vpn/bootstrap-vpn.sh")" == 755 ]]
-for file in README.md SHA256SUMS VERSION; do
+for file in SHA256SUMS VERSION; do
     [[ "$(stat -c '%a' "$extract_dir/toolkit-vpn/$file")" == 644 ]]
 done
 

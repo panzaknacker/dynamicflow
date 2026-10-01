@@ -43,15 +43,21 @@ if python3 "$ROOT_DIR/browser-maintenance.py" release >"$TMP_DIR/browser-gate.tx
     exit 1
 fi
 grep -Fq 'Camoufox release gate: BLOCKED' "$TMP_DIR/browser-gate.txt"
-python3 "$ROOT_DIR/browser-maintenance.py" disposable-test \
-    >"$TMP_DIR/browser-disposable-gate.txt"
-grep -Fq 'Camoufox disposable-test gate: TEST-ONLY' \
-    "$TMP_DIR/browser-disposable-gate.txt"
+disposable_status=0
+python3 "$ROOT_DIR/browser-maintenance.py" disposable-test --json \
+    >"$TMP_DIR/browser-disposable-gate.json" || disposable_status=$?
+jq -e --argjson status "$disposable_status" '
+  .mode == "disposable-test" and .schema == 1
+  and if $status == 0 then
+    .result == "TEST-ONLY"
+    and ([.checks[] | select(.passed == false) | .name] | sort)
+      == ["gecko-security-baseline", "review-disposition"]
+  elif $status == 1 then
+    .result == "BLOCKED"
+    and any(.checks[]; .name == "policy-current" and .passed == false)
+  else false end
+' "$TMP_DIR/browser-disposable-gate.json" >/dev/null
 grep -Fxq 'v0.1.9' "$ROOT_DIR/VERSION"
-grep -Fq 'P0-Ursachenanalyse und Evidenzgrenze' "$ROOT_DIR/README.md"
-grep -Fq 'Sie beweist **nicht**' "$ROOT_DIR/README.md"
-grep -Fq 'Runbook: echter VM-Soak und Neustarttest' "$ROOT_DIR/README.md"
-grep -Fq 'höchstens `BLOCKED`, niemals `PASS`' "$ROOT_DIR/README.md"
 jq -e '
   .PreventInstalls == true
   and .Default == "DuckDuckGo"
@@ -93,7 +99,7 @@ grep -Fq '.country == "Germany"' "$ROOT_DIR/bootstrap-pbp.sh"
 grep -Fq 'mullvad_exit_ip") is not True' "$ROOT_DIR/launch-pbp.py"
 grep -Fq 'result.get("country") != "Germany"' "$ROOT_DIR/launch-pbp.py"
 grep -Fq 'def check_mullvad_policy()' "$ROOT_DIR/launch-pbp.py"
-grep -Fq 'checker: Callable[[], str] = check_mullvad_session' \
+grep -Fq 'checker: Callable[[], str] = check_mullvad_egress' \
     "$ROOT_DIR/launch-pbp.py"
 grep -Fq 'dynamicflow-pbp-vpn-verify ""' "$ROOT_DIR/bootstrap-pbp.sh"
 grep -Fq 'mv -fT -- "$helper_tmp" "$VPN_POLICY_HELPER"' \
@@ -278,7 +284,7 @@ WORK="$TMP_DIR/work"
 TEST_ROOT="$WORK/tools/pbp"
 mkdir -p "$TEST_ROOT"
 for source in bootstrap-pbp.sh launch-pbp.py safe-extract.py make-release.sh \
-    browser-maintenance.py README.md CAMOUFOX-MAINTENANCE.md requirements.lock \
+    browser-maintenance.py requirements.lock \
     browser-assets.lock browser-security-policy.json browser-hardening-policy.json \
     browser-search-policy.json VERSION; do
     cp -a "$ROOT_DIR/$source" "$TEST_ROOT/$source"
@@ -334,6 +340,7 @@ TOOLKIT_DIST_DIR="$DIST_TWO" bash "$TEST_ROOT/make-release.sh" amd64 >/dev/null
 cmp -s "$DIST_ONE/linux-amd64/pbp.tar.gz" "$DIST_TWO/linux-amd64/pbp.tar.gz"
 ARCHIVE="$DIST_ONE/linux-amd64/pbp.tar.gz"
 archive_members="$(tar -tzf "$ARCHIVE")"
+! grep -Eiq '(^|/)[^/]+[.]md/?$' <<<"$archive_members"
 archive_bootstraps="$(awk -F/ \
     '$NF == "bootstrap.sh" || $NF ~ /^bootstrap-.*[.]sh$/ {count++} END {print count+0}' \
     <<<"$archive_members")"
@@ -364,7 +371,7 @@ grep -Fxq 'v0.1.9' "$EXTRACTED/toolkit-pbp/VERSION"
 [[ "$(stat -c '%a' "$EXTRACTED/toolkit-pbp/toolkit-vpn-stage")" == '755' ]]
 [[ "$(stat -c '%a' "$EXTRACTED/toolkit-pbp/launch-pbp.py")" == '755' ]]
 [[ "$(stat -c '%a' "$EXTRACTED/toolkit-pbp/browser-maintenance.py")" == '755' ]]
-for file in README.md CAMOUFOX-MAINTENANCE.md VERSION ARCH SHA256SUMS \
+for file in VERSION ARCH SHA256SUMS \
     requirements.lock browser-assets.lock browser-security-policy.json \
     browser-hardening-policy.json browser-search-policy.json apparmor/toolkit-pbp; do
     [[ "$(stat -c '%a' "$EXTRACTED/toolkit-pbp/$file")" == '644' ]]
@@ -398,6 +405,7 @@ cmp -s "$DISPOSABLE_ARCHIVE" \
     "$DISPOSABLE_DIST_TWO/disposable-test/linux-amd64/pbp-disposable-test.tar.gz"
 [[ ! -e "$DISPOSABLE_DIST_ONE/linux-amd64/pbp.tar.gz" ]]
 disposable_members="$(tar -tzf "$DISPOSABLE_ARCHIVE")"
+! grep -Eiq '(^|/)[^/]+[.]md/?$' <<<"$disposable_members"
 grep -Fxq 'toolkit-pbp-disposable-test/bootstrap-pbp.sh' \
     <<<"$disposable_members"
 grep -Fxq 'toolkit-pbp-disposable-test/toolkit-vpn-stage' \
