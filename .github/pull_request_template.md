@@ -1,13 +1,14 @@
-## Change
+## Änderung
 
-Describe the problem and the resulting behavior. Link an issue if applicable.
+Problem, betroffene Komponente und das neue Verhalten beschreiben.
+Ein zugehöriges Issue verlinken, falls vorhanden.
 
-## Validation
+## Prüfung
 
-List the commands actually run and their results, including skipped checks.
-For core behavior changes, include `make check` and relevant failure cases.
+Ausgeführte Befehle, Umgebung und Ergebnisse nennen, einschließlich
+übersprungener Prüfungen. Bei Kernänderungen `make check` und relevante Fehlerfälle angeben.
 
-## Scope and limitations
+## Umfang und Grenzen
 
-Describe affected trust boundaries, state changes and recovery behavior.
-Update the project status when a capability or its qualification changes.
+Auswirkungen auf Vertrauen, Zugriff, Zustand und Wiederherstellung erklären.
+Den Projektstatus aktualisieren, wenn sich Fähigkeiten oder ihre Abnahme ändern.

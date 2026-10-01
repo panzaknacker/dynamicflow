@@ -1,27 +1,28 @@
-# Local review — 2026-10-01
+# Lokale Nachprüfung · 01.10.2026
 
-`make check demo` passed with Go 1.26.8: build, 32 unit-test packages,
-the same packages with the race detector, vet, static checks and all five demo
-steps. No runtime implementation or tests were changed.
+`make check demo` bestand mit Go 1.26.8: Build, 32 Unit-Testpakete, dieselben
+Pakete mit Race-Detector, vet, statische Prüfungen und fünf Demo-Schritte.
+Go-Code und Tests wurden nicht geändert.
 
-[Complete output](verification/2026-10-01-core-go1.26.8.txt).
+[Vollständiges Protokoll](verification/2026-10-01-core-go1.26.8.txt).
 
-An initial run inside the agent sandbox failed because loopback sockets were
-blocked and root directory ownership appeared as UID/GID 65534. The unchanged
-source passed outside that sandbox, in a checkout with trusted ancestor paths.
+Der erste Lauf in der Agent-Sandbox scheiterte an gesperrten Loopback-Sockets
+und abweichend dargestellten Eigentümern von Root-Verzeichnissen. Derselbe
+Quellstand bestand außerhalb der Sandbox in einem Checkout mit sicheren Pfaden.
 
-## Environment and source
+## Umgebung und Quellstand
 
-Fedora 44 x86_64, kernel 7.2.5-200.fc44; Go 1.26.8 where used and Python
-3.14.7. Prepared tools and module caches were reused; Go proxy and checksum
-lookups were disabled. Data and keys were synthetic and temporary.
+Fedora 44 x86_64, Kernel 7.2.5-200.fc44; Go 1.26.8, soweit verwendet,
+und Python 3.14.7. Vorbereitete Werkzeuge und Modulcaches wurden wiederverwendet.
+Go-Proxy und Prüfsummenabrufe waren deaktiviert. Daten und Schlüssel waren
+synthetisch und temporär.
 
-[Context](verification/2026-10-01-context.json) ·
-[Code and build inputs](verification/2026-10-01-inputs.sha256)
+[Kontext](verification/2026-10-01-context.json) ·
+[Geprüfte Code-/Build-Eingaben](verification/2026-10-01-inputs.sha256)
 
-Local checkout paths, tool paths and temporary demo key values were normalized; results were not
-changed. Repository history was scanned with Gitleaks 8.30.1 across all refs
-without reported findings. This does not audit development history absent
-from the snapshot or qualify a production deployment.
+Lokale Checkout-/Werkzeugpfade und zufällige öffentliche Demo-Key-IDs wurden
+normalisiert; Ergebnisse und Fehler blieben erhalten. Gitleaks 8.30.1 meldete
+bei der Prüfung aller vorhandenen Git-Refs keine Geheimnisse. Nicht mitgelieferte
+ursprüngliche Entwicklungshistorie und Produktionsreife sind davon nicht erfasst.
 
-[Hosted CI start failures](HOSTED-CI.md) are separate from these local results.
+[Gehostete CI-Startfehler](HOSTED-CI.md) sind von diesen lokalen Ergebnissen getrennt.

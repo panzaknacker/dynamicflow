@@ -1,24 +1,24 @@
-# Hosted CI status
+# Gehostete CI
 
-## 2026-10-01
+## Prüfversuch vom 01.10.2026
 
-GitHub Actions were disabled before this review. The existing verification and
-secret-scan workflows were temporarily enabled and dispatched:
+GitHub Actions waren vor der Durchsicht deaktiviert. Die vorhandenen Prüf- und
+Secret-Scan-Workflows wurden kurz aktiviert und manuell gestartet:
 
-- [Verification run](https://github.com/panzaknacker/dynamicflow/actions/runs/36853153233)
-- [Secret-scan run](https://github.com/panzaknacker/dynamicflow/actions/runs/36853165889)
+- [Prüflauf](https://github.com/panzaknacker/dynamicflow/actions/runs/36853153233)
+- [Secret-Scan](https://github.com/panzaknacker/dynamicflow/actions/runs/36853165889)
 
-Both ended with `startup_failure` before any job was created. The Jobs API and
-check-run list were empty; no runner logs or error annotations were available.
-The API did not expose the underlying startup reason. No tests executed in
-these hosted runs, and they do not establish a passing CI result.
+Beide endeten mit `startup_failure`, bevor ein Job angelegt wurde. Jobs-API und
+Check-Run-Liste blieben leer; Runner-Logs oder Fehleranmerkungen waren nicht
+verfügbar. Der genaue Startgrund wurde über die API nicht ausgegeben.
+In diesen gehosteten Läufen wurden keine Tests ausgeführt.
 
-Actionlint 1.7.12 independently accepted both workflow files. The pinned
-checkout action exists. These checks do not diagnose the GitHub startup failure.
+Actionlint 1.7.12 akzeptierte beide Workflow-Dateien. Die festgelegte
+Checkout-Aktion existiert. Diese Prüfungen diagnostizieren den Startfehler nicht.
 
-Actions were returned to their original disabled state to avoid repeated
-notifications during documentation changes. The failed runs remain available.
-Re-enable and observe the workflows once the startup issue is understood;
-do not infer production readiness from a later local or hosted green result.
+Actions wurden auf den ursprünglichen deaktivierten Zustand zurückgestellt,
+um weitere Fehlmeldungen bei Dokumentationsänderungen zu vermeiden. Die
+fehlgeschlagenen Läufe bleiben sichtbar. Nach Klärung der Ursache die Workflows
+gezielt aktivieren und beobachten. Lokale Ergebnisse sind getrennt dokumentiert.
 
-[Repository status](../PROJECT_STATUS.md)
+[Projektstatus](../PROJECT_STATUS.md)
