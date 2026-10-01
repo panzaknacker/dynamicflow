@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible problem using synthetic data.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: "For security-sensitive findings, read [SECURITY.md](https://github.com/panzaknacker/dynamicflow/blob/main/SECURITY.md) first."
+  - type: input
+    id: revision
+    attributes:
+      label: Commit and environment
+      description: Commit SHA, operating system and Go version.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal example with synthetic inputs.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Remove keys, host inventories and private state before sharing.

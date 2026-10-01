@@ -1,21 +1,22 @@
-# Sicherheitsrichtlinie
+# Security policy
 
-## Unterstützungsstatus
+## Support status
 
-Dynamicflow ist in Entwicklung und nicht produktionsfreigegeben. Es gibt noch
-keine unterstützte Version.
+Development snapshot; no version is supported for production use.
 
-## Sicherheitslücken melden
+## Reporting a vulnerability
 
-Keine Schwachstelle mit echten Schlüsseln, .flow-Inhalten, Hostinventaren oder
-Release-State als öffentliches Issue melden. Wenn aktiviert, GitHubs private
-Vulnerability-Reporting-Funktion verwenden; andernfalls zuerst den Maintainer
-über sein GitHub-Profil kontaktieren.
+When available, use GitHub's private vulnerability reporting under the
+repository's **Security** tab. If that channel is unavailable, open an issue
+requesting a private reporting channel, without describing the vulnerability.
+Private reviewers may use their existing agreed contact channel.
 
-Berichte sollten Commit, betroffene Trust-Grenze, erwartete Signatur- oder
-Pin-Prüfung und eine minimale Reproduktion mit Wegwerf-VMs enthalten.
+Do not post private keys, FLOW_HOME state, host inventories or release state in public issues.
+Include the affected commit and component, the trust boundary involved,
+expected behavior and a minimal reproduction with synthetic inputs in the
+private report. There is no guaranteed response time or security support SLA.
 
-## Testgrenze
+## Evaluation boundaries
 
-Nur ausdrücklich als disposable markierte eigene Systeme verwenden. E2E- und
-Soak-Läufe dürfen keine fremden oder produktiven Hosts verändern.
+Use operator-owned disposable VMs for integration tests. Keep the unfinished
+control route disabled; core checks do not qualify a multi-VM deployment.

@@ -1,74 +1,82 @@
-# Dynamicflow
+# dynamicflow
 
-Dynamicflow entstand, weil ich für eigene offensive Security Research zwischen
-Hosting-Anbietern wechsle und VMs und Nodes nicht jedes Mal neu vorbereiten
-wollte. Auch die Kosten waren ein Grund für diese Wechsel. Das Werkzeug bündelt
-wiederverwendbare Linux-VM-Profile für Labs und autorisierte Tests.
+Reusable Linux VM profiles for research environments and authorized security labs.
+The Go control plane resolves component dependencies, verifies signed releases
+and manages desired instance state.
 
-Die Go-Control-Plane verwaltet Profile, signierte Releases und gewünschte
-Instanzzustände. Release-, Desired-State- und Control-Signaturen verwenden
-getrennte Schlüssel.
-[Hintergrund und Entscheidungen](docs/PORTFOLIO.md).
+I started dynamicflow to avoid rebuilding similar VM and node configurations
+when switching hosting providers. Private variants have been used for my own
+research; their exact relationship to this snapshot is still being documented.
+[Background and decisions](docs/PORTFOLIO.md).
 
-## Stand dieses Repositorys
+**In development.** The local Go core is available for evaluation. Remote
+lifecycle operations, enrollment and serving remain disabled with
+`control_route_unavailable` while the replacement control route is incomplete.
+[Scope and remaining work](PROJECT_STATUS.md).
 
-**In Entwicklung.** Der lokale Go-Kern lässt sich bauen und testen. Die neue
-Control-Route ist unvollständig; entfernte Lifecycle-Aktionen, Enrollment und
-Serving-Betrieb sind derzeit mit `control_route_unavailable` gesperrt.
+## Try the local walkthrough
 
-## Lokal ansehen
+Requirements: Linux, Bash, GNU Make, OpenSSH (`ssh`, `ssh-keygen`) and the Go
+version specified in [go.mod](go.mod). Initial builds may download Go modules.
 
 ```sh
 make demo
 ```
 
-Die Demo baut die CLI, legt temporären State an, zeigt Profile und prüft
-Signaturen sowie die Remote-Sperre. Benötigt werden Linux, Bash, GNU Make,
-Go gemäß `go.mod` und OpenSSH (`ssh`, `ssh-keygen`). Beim ersten Build können
-Go-Module geladen werden. [Ablauf und Fehlerhilfe](docs/DEMO.md).
+The walkthrough builds the CLI, creates temporary state, resolves profiles,
+verifies signatures and demonstrates the expected rejection of remote actions.
+It needs no cloud account or deployed VM. [Steps and troubleshooting](docs/DEMO.md).
 
-Für den vollständigen Kerncheck wird zusätzlich ein C-Compiler benötigt:
+For the complete local core check, also install a C compiler:
 
 ```sh
 make check
 ```
 
-Das umfasst Build, Unit- und Race-Tests, `go vet` und statische
-Sicherheitsprüfungen. [Prüfergebnisse](docs/VERIFICATION.md).
+This runs the build, unit and race tests, `go vet` and static security checks.
+VNC path tests require a checkout whose ancestor directories are not group- or
+world-writable; a checkout under `/tmp` does not satisfy that condition.
 
-## Aufbau
+## What to review
 
-- `flow` ist die CLI für Profile, Schlüssel und Instanzzustände.
-- `serving` verteilt signierte, unveränderliche Release-Sets und Desired State.
-- SSH, VPN und PBP liefern die mitgelieferten Komponentenskripte.
-- `examstation` ist nur deklariert; der Quellcode fehlt. `decepticon` bleibt eine
-  externe Integration. Beide sind im Target-Runner nicht freigegeben.
+| Area | Code entry | Decision |
+| --- | --- | --- |
+| Profiles | [Resolution](internal/cli/profile.go) · [Definitions](profiles/) | Resolve dependencies before changing an environment. |
+| Signatures | [Signing](internal/signing/) · [Verification](internal/release/) | Release, desired-state and control signatures use separate trust roots. |
+| Remote boundary | [Control-route gate](internal/cli/control_route_gate.go) | Unfinished operations fail before state, network or process access. |
+| Release serving | [Serving component](serving/) | Distribution and a complete deployment have separate qualification requirements. |
 
-Der vollständige Plattformablauf braucht zusätzliche Inputs, die fertige
-Control-Route und eine Mehr-VM-Abnahme. Umfang und offene Arbeiten stehen in
-[PROJECT_STATUS.md](PROJECT_STATUS.md) und der
-[Abnahmematrix](docs/COMPLETION-AUDIT.md).
+`examstation` is declared but its source is absent; `decepticon` is an external
+integration. Neither is enabled in the target runner. Component checks and a
+complete platform release are separate from `make check`.
 
-## Sicherheitsgrenzen
+## Evidence and limits
 
-Release-, Desired-State- und Control-Keys sind getrennte Vertrauenswurzeln.
-`FLOW_HOME` enthält private Schlüssel, Trust-Pins und Auditdaten und bleibt
-außerhalb von Git. SSH-Hostkeys werden unabhängig geprüft und gepinnt;
-`ssh-keyscan` allein genügt nicht. VNC bleibt auf Loopback.
+The recorded September 2026 local runs passed the demo and full core check with
+Go 1.24.2 and 1.26.8, including 32 test packages with and without the race
+detector. [Commands, logs and environment](docs/VERIFICATION.md).
+[Current GitHub workflows](https://github.com/panzaknacker/dynamicflow/actions)
+are separate from these local results.
+[Hosted startup failure and current CI state](docs/HOSTED-CI.md).
 
-[Threat Model](docs/THREAT-MODEL.md) und [Sicherheitsmeldungen](SECURITY.md).
+`FLOW_HOME` holds private keys, trust pins and audit data and stays outside Git.
+SSH host keys need independent verification; `ssh-keyscan` alone does not
+establish trust. VNC remains bound to loopback. There is no supported production
+release; the control route, multi-VM lifecycle and recovery still need qualification.
+[Threat model](docs/THREAT-MODEL.md).
 
-## Dokumentation
+[Latest local review and logs](docs/LOCAL-REVIEW-2026-10-01.md).
 
-- [Lokale Demo](docs/DEMO.md) und [Projektprofil](docs/PORTFOLIO.md)
-- [Entwicklung und Build](docs/DEVELOPMENT.md)
-- [Architektur](docs/adr/0001-platform-control-plane.md)
-- [Geplanter Betriebsablauf](docs/QUICKSTART.md) und [Runbook](docs/OPERATOR-RUNBOOK.md)
-- [Wiederherstellung](docs/RECOVERY-RUNBOOK.md)
-- [VM-Lab](docs/LAB-E2E-RUNBOOK.md) und [PBP-Untersuchung](docs/PBP-INCIDENT.md)
-- [Beiträge](CONTRIBUTING.md)
+## Documentation
 
-## Lizenz
+- [Demo](docs/DEMO.md) · [Verification](docs/VERIFICATION.md) · [Project status](PROJECT_STATUS.md)
+- [Development](docs/DEVELOPMENT.md) · [Architecture](docs/adr/0001-platform-control-plane.md)
+- [Operator runbook](docs/OPERATOR-RUNBOOK.md) · [Recovery](docs/RECOVERY-RUNBOOK.md)
+- [Qualification matrix](docs/COMPLETION-AUDIT.md) · [VM lab](docs/LAB-E2E-RUNBOOK.md)
+- [Contributing](CONTRIBUTING.md) · [Security reports](SECURITY.md)
 
-[Apache License 2.0](LICENSE). Hinweise zu Drittanbieterkomponenten bleiben
-in den jeweiligen Unterverzeichnissen erhalten.
+Detailed engineering notes and historical evidence include German documents.
+
+## License
+
+[Apache License 2.0](LICENSE). Preserve the notices for third-party components.

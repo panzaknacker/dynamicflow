@@ -1,25 +1,30 @@
-# Beiträge
+# Contributing
 
-Mit dem [Entwicklungsleitfaden](docs/DEVELOPMENT.md) und dem
-[Projektstatus](PROJECT_STATUS.md) beginnen. Beiträge fokussiert halten und das
-beobachtbare Verhalten, die betroffene Sicherheitsgrenze und die ausgeführten
-Prüfungen erläutern.
+Start with [Development guide](docs/DEVELOPMENT.md) and [PROJECT_STATUS.md](PROJECT_STATUS.md).
+Keep changes focused and explain the problem, resulting behavior and affected
+trust boundaries.
 
-Bei Änderungen am Go-Kern `make check` ausführen. Geänderte Go-Dateien mit
-`gofmt` formatieren. Bei Änderungen an Komponentenskripten die passende lokale
-Komponentenprüfung ausführen. Änderungen an Signaturen, Vertrauen, Enrollment
-oder Dateisystemrechten brauchen gezielte Regressionstests für abgelehnte
-Eingaben ebenso wie für den vorgesehenen Weg.
+## Local validation
 
-Keine erzeugten Binaries, privaten Zustand, Zugangsdaten, echten Inventare,
-Vendor-Archive oder ohne Lizenzhinweise kopierten Fremdquellcode committen.
-Synthetische Fixtures verwenden. Sicherheitsprobleme vertraulich melden, wie in
-[SECURITY.md](SECURITY.md) beschrieben.
+Run `make check` for core changes and `make demo` for the local walkthrough.
+Prepare Linux, Go from `go.mod`, GNU Make, Bash, OpenSSH and a C compiler.
+The VNC checks require a checkout outside group- or world-writable ancestors.
 
-Unfertiges Verhalten in codenahen Meldungen und in der Dokumentation als
-**in Entwicklung** gekennzeichnet lassen. Nachweise aus simulierten, lokalen
-und echten Umgebungen getrennt beschreiben. Ein grüner Kerntest rechtfertigt
-keine Aussage über Produktionsreife.
+Run the relevant checks before submitting a change and record their actual
+results, environment and skipped checks. Format Go changes with `gofmt`.
+Behavior changes need regression coverage for rejected inputs and failure
+paths as well as the intended workflow.
 
-Beiträge erfolgen unter der Apache-2.0-Lizenz des Repositorys. Bestehende
-Urheberrechts- und Drittanbieterhinweise erhalten.
+## Review expectations
+
+Preserve explicit approvals, pinned trust, failure handling and recovery
+boundaries. Update the component status when a capability or its qualification
+changes. Distinguish local, simulated and deployed results.
+
+Use synthetic fixtures. Do not commit generated binaries, private state,
+credentials, real inventories or copied third-party code without its notices.
+Report sensitive findings through [SECURITY.md](SECURITY.md).
+
+## Source terms
+
+Contributions follow the existing [Apache-2.0 license](LICENSE).
