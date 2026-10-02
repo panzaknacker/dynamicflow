@@ -10,10 +10,15 @@ Das Browser-Toolkit bleibt mit seiner abgelaufenen Sicherheitsfreigabe gesperrt.
 
 ## Ausprobieren
 
-Linux, Bash, GNU Make, OpenSSH und Go gemäß [go.mod](go.mod) bereitstellen.
+Linux, Git, Bash, GNU Make, OpenSSH und Go gemäß [go.mod](go.mod) bereitstellen.
 Der erste Build kann Module herunterladen.
 
+Das Repository im eigenen Home-Verzeichnis klonen und die Befehle aus dessen
+Wurzelverzeichnis ausführen:
+
 ```sh
+git clone https://github.com/panzaknacker/dynamicflow.git "$HOME/dynamicflow"
+cd "$HOME/dynamicflow"
 make demo
 make check
 ```
