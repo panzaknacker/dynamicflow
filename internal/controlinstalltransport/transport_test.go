@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -186,6 +187,31 @@ func TestNewExecutableRejectsWritableSymlinkAndHardlinkAndCannotSerializePath(t 
 	}
 	if _, err := json.Marshal(executable); !errors.Is(err, ErrPrivatePathJSON) {
 		t.Fatalf("Executable JSON error = %v", err)
+	}
+}
+
+func TestNewExecutableRejectsFIFOWithoutWaitingForWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "flow-fifo")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := NewExecutable(path)
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrUnsafeExecutable) {
+			t.Fatalf("FIFO was accepted as an executable: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		// Release a regressed blocking reader before failing the test, so
+		// neither a goroutine nor a FIFO descriptor survives the fixture.
+		if fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0); err == nil {
+			_ = syscall.Close(fd)
+		}
+		t.Fatal("opening an executable FIFO waited for a writer")
 	}
 }
 

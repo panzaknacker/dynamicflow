@@ -44,7 +44,6 @@ func managementUsernameForUID(passwd []byte, uid int) (string, error) {
 	if uid <= 0 || len(passwd) == 0 || len(passwd) > maxLocalPasswdBytes {
 		return "", ErrSessionDenied
 	}
-	uidText := strconv.Itoa(uid)
 	matchingName, matchingUID := 0, 0
 	for _, line := range strings.Split(string(passwd), "\n") {
 		if line == "" {
@@ -54,13 +53,20 @@ func managementUsernameForUID(passwd []byte, uid int) (string, error) {
 		if len(fields) != 7 {
 			return "", ErrSessionDenied
 		}
+		accountUID, err := strconv.ParseUint(fields[2], 10, 32)
+		if err != nil || strconv.FormatUint(accountUID, 10) != fields[2] {
+			// UID aliases such as 01001 still identify numeric UID 1001 on
+			// Linux. Reject a noncanonical account database before counting
+			// identities, so no alternate spelling conceals a shared UID.
+			return "", ErrSessionDenied
+		}
 		if fields[0] == ManagementUser {
 			matchingName++
-			if fields[2] != uidText {
+			if accountUID != uint64(uid) {
 				return "", ErrSessionDenied
 			}
 		}
-		if fields[2] == uidText {
+		if accountUID == uint64(uid) {
 			matchingUID++
 			if fields[0] != ManagementUser {
 				return "", ErrSessionDenied
@@ -81,7 +87,7 @@ func readRootOwnedActiveEnvelope(stateRoot string) ([]byte, error) {
 }
 
 func readActiveEnvelopeAt(anchor, stateRoot string, ownerUID, ownerGID uint32) ([]byte, error) {
-	if !safeAbsolutePath(anchor) || !safeAbsolutePath(stateRoot) ||
+	if !safeTrustAnchor(anchor) || !safeAbsolutePath(stateRoot) ||
 		!pathInside(anchor, stateRoot) {
 		return nil, ErrUnsafeHost
 	}

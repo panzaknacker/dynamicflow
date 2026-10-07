@@ -8,9 +8,9 @@ import (
 	"dynamicflow/internal/reconcile"
 )
 
-// prepareRuntimeHandoff replaces only the fixed flow executable. when bytes
+// prepareRuntimeHandoff replaces only the fixed flow executable. When bytes
 // changed it deliberately returns before reconcile can run any profile phase
-// or advance the apply checkpoint. the next timer invocation starts the new
+// or advance the apply checkpoint. The next timer invocation starts the new
 // /usr/local/bin/flow and resumes the content-bound plan idempotently.
 func (r *runner) prepareRuntimeHandoff(ctx context.Context) (bool, error) {
 	phase, err := r.phase("flow")

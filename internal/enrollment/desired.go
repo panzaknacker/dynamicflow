@@ -72,9 +72,9 @@ func VerifyDesiredState(signed SignedDesiredState, publicKey ed25519.PublicKey, 
 }
 
 // VerifyDesiredStateForRenewal authenticates a previously issued document as
-// the predecessor of a strictly newer desired state. expiry is intentionally
+// the predecessor of a strictly newer desired state. Expiry is intentionally
 // ignored in this one narrow mode, while signature, instance/profile binding,
-// generation rollback and future-issued checks remain mandatory. installers
+// generation rollback and future-issued checks remain mandatory. Installers
 // must always use VerifyDesiredState instead.
 func VerifyDesiredStateForRenewal(signed SignedDesiredState, publicKey ed25519.PublicKey, expected DesiredExpectation) error {
 	return verifyDesiredState(signed, publicKey, expected, true)

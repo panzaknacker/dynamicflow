@@ -35,8 +35,8 @@ func TestProductionUnitContractIsFixedPullOnlyAndInstallerCompatible(t *testing.
 			t.Fatalf("service is missing %q:\n%s", contract, service)
 		}
 	}
-	// the fixed reconciler may mutate /etc, /opt, /home, /var and package
-	// state, manipulate nftables/sysctls, and start mullvad/VNC units. these
+	// The fixed reconciler may mutate /etc, /opt, /home, /var and package
+	// state, manipulate nftables/sysctls, and start Mullvad/VNC units. These
 	// otherwise-useful directives would silently break a valid signed profile.
 	forbidden := []string{
 		"ProtectSystem=", "ProtectHome=", "PrivateNetwork=", "PrivateDevices=",

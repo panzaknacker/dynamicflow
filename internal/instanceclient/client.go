@@ -1,5 +1,5 @@
-// package instanceclient implements the deliberately narrow, outbound-HTTPS
-// client used by a dynamicflow instance. it owns a stable instance identity,
+// Package instanceclient implements the deliberately narrow, outbound-HTTPS
+// client used by a Dynamicflow instance. It owns a stable instance identity,
 // consumes a one-time enrollment credential, verifies independently signed
 // release and desired-state documents, and authenticates subsequent desired
 // and status requests with that identity.
@@ -60,7 +60,7 @@ var (
 	keyIDRE      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
-// Config contains only non-secret, durable client configuration. the
+// Config contains only non-secret, durable client configuration. The
 // enrollment secret is deliberately supplied to Enroll through an io.Reader
 // and is never part of Config, a URL, an environment variable, or state.
 type Config struct {
@@ -88,7 +88,7 @@ type EnrollmentResult struct {
 	State   State                         `json:"state"`
 }
 
-// Client is safe for concurrent use within one process. a private on-disk
+// Client is safe for concurrent use within one process. A private on-disk
 // flock additionally serializes enrollment and state changes across clients
 // and processes that share StateDir.
 type Client struct {
@@ -135,7 +135,7 @@ type errorResponse struct {
 	} `json:"error"`
 }
 
-// HTTPError reports only a bounded, syntactically safe API error code. server
+// HTTPError reports only a bounded, syntactically safe API error code. Server
 // messages and bodies are intentionally excluded so reflected credentials or
 // other untrusted response data can never reach caller logs through Error().
 type HTTPError struct {
@@ -163,7 +163,7 @@ func (err *enrollmentOutcomeError) Unwrap() []error {
 }
 
 // New validates the complete trust configuration, creates or reuses the
-// stable identity, and loads the atomically persisted public state. existing
+// stable identity, and loads the atomically persisted public state. Existing
 // identity material is never silently replaced.
 func New(config Config) (*Client, error) {
 	if config.StateDir == "" || !identifierRE.MatchString(config.Instance) || !identifierRE.MatchString(config.Profile) ||
@@ -264,7 +264,7 @@ func (client *Client) IdentityKeyID() string {
 }
 
 // Close drops idle connections and overwrites the Client's in-memory private
-// key buffer. the durable 0600 identity remains available for the next run.
+// key buffer. The durable 0600 identity remains available for the next run.
 func (client *Client) Close() error {
 	client.mu.Lock()
 	defer client.mu.Unlock()
@@ -278,9 +278,9 @@ func (client *Client) Close() error {
 	return nil
 }
 
-// Enroll consumes one enrollment ID and secret exactly once. the secret is
+// Enroll consumes one enrollment ID and secret exactly once. The secret is
 // read only after the release endpoint has passed TLS pinning and signature
-// verification. call FetchDesired after an ambiguous network failure: serving
+// verification. Call FetchDesired after an ambiguous network failure: serving
 // may have consumed the credential even if its response did not arrive.
 func (client *Client) Enroll(ctx context.Context, enrollmentID string, secretReader io.Reader) (EnrollmentResult, error) {
 	client.mu.Lock()
@@ -359,13 +359,13 @@ func enrollmentResponseMayHaveConsumed(err error) bool {
 	if errors.As(err, &httpError) {
 		return httpError.Code == "desired_unavailable" || httpError.StatusCode >= http.StatusInternalServerError
 	}
-	// a transport or local response-processing failure after issuing the
+	// A transport or local response-processing failure after issuing the
 	// non-replayable POST has an unknown server-side outcome.
 	return true
 }
 
 // FetchDesired obtains the currently signed desired state using a fresh,
-// instance-signed request. it intentionally also works before local Enrolled
+// instance-signed request. It intentionally also works before local Enrolled
 // is true so a consumed enrollment with a lost response can be recovered.
 func (client *Client) FetchDesired(ctx context.Context) (EnrollmentResult, error) {
 	client.mu.Lock()
@@ -409,7 +409,7 @@ func (client *Client) FetchDesired(ctx context.Context) (EnrollmentResult, error
 }
 
 // ReportStatus validates all instance/profile/generation/release bindings,
-// canonicalizes the report, and signs the exact POST path and body. it never
+// canonicalizes the report, and signs the exact POST path and body. It never
 // opens an inbound connection or executes a remotely supplied command.
 func (client *Client) ReportStatus(ctx context.Context, report serving.StatusReport) error {
 	client.mu.Lock()
@@ -470,8 +470,8 @@ func (client *Client) ReportStatus(ctx context.Context, report serving.StatusRep
 	})
 }
 
-// ReportLogs uploads only the finite, sanitized LogEvent contract. it cannot
-// transmit arbitrary stderr, urls, enrollment material or secret-bearing text.
+// ReportLogs uploads only the finite, sanitized LogEvent contract. It cannot
+// transmit arbitrary stderr, URLs, enrollment material or secret-bearing text.
 func (client *Client) ReportLogs(ctx context.Context, batch serving.LogBatch) error {
 	client.mu.Lock()
 	defer client.mu.Unlock()
@@ -618,8 +618,8 @@ func (client *Client) doJSONLocked(
 	if err != nil {
 		return nil, fmt.Errorf("create serving request: %w", err)
 	}
-	// a non-nil body with no GetBody prevents net/http from transparently
-	// replaying even gets. callers explicitly retry with a fresh signed nonce.
+	// A non-nil body with no GetBody prevents net/http from transparently
+	// replaying even GETs. Callers explicitly retry with a fresh signed nonce.
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	request.GetBody = nil
 	request.ContentLength = int64(len(body))

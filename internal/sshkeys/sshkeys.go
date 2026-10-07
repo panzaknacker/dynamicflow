@@ -1,4 +1,4 @@
-// package sshkeys manages owner-local Ed25519 identities. Private key material
+// Package sshkeys manages owner-local Ed25519 identities. Private key material
 // is written only to mode-0600 files and is never returned by this package.
 package sshkeys
 
@@ -31,7 +31,7 @@ const (
 	Instance  Scope = "instance"
 	Bootstrap Scope = "bootstrap"
 	// Control is the long-lived owner-local management identity for a Control
-	// node. managers must opt in explicitly with WithControlScope so adding the
+	// node. Managers must opt in explicitly with WithControlScope so adding the
 	// internal scope cannot expose it through the existing generic key CLI.
 	Control Scope = "control"
 )
@@ -53,7 +53,7 @@ var (
 	keyName          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 )
 
-// Record contains only public metadata. it deliberately has no private-key
+// Record contains only public metadata. It deliberately has no private-key
 // field or private-key bytes.
 type Record struct {
 	SchemaVersion       int        `json:"schema_version"`
@@ -111,7 +111,7 @@ func NewManager(store *localstate.Store, options ...Option) *Manager {
 }
 
 // ValidateEd25519PublicKey normalizes a public Ed25519 key and returns its
-// OpenSSH SHA256 fingerprint. it never accepts private key material.
+// OpenSSH SHA256 fingerprint. It never accepts private key material.
 func ValidateEd25519PublicKey(publicKey string) (normalized string, fingerprint string, err error) {
 	return parsePublicKey([]byte(publicKey))
 }
@@ -142,13 +142,13 @@ func (m *Manager) Create(ctx context.Context, scope Scope, name string) (Record,
 }
 
 // Rotate creates a new immutable generation and atomically switches metadata
-// to it. a complete pending generation is reused after an interrupted switch.
+// to it. A complete pending generation is reused after an interrupted switch.
 func (m *Manager) Rotate(ctx context.Context, scope Scope, name string) (Record, error) {
 	return m.rotate(ctx, scope, name, 0)
 }
 
 // RotateIfGeneration performs the generation check and rotation under the
-// same identity lock. it prevents two concurrent operator commands from
+// same identity lock. It prevents two concurrent operator commands from
 // advancing a target-bound identity more than one unacknowledged generation.
 func (m *Manager) RotateIfGeneration(ctx context.Context, scope Scope, name string, expected uint64) (Record, error) {
 	if expected == 0 {

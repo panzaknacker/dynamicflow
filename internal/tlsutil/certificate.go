@@ -1,4 +1,4 @@
-// package tlsutil manages the serving node's transport-only TLS identity.
+// Package tlsutil manages the serving node's transport-only TLS identity.
 // TLS keys are deliberately separate from release/desired-state signing keys.
 package tlsutil
 
@@ -26,7 +26,7 @@ import (
 var ErrUnsafeTLSPath = errors.New("unsafe TLS identity path")
 
 // GenerateSelfSigned creates an Ed25519 self-signed transport certificate.
-// existing files are never replaced. hardened clients pin the returned cert.
+// Existing files are never replaced. Hardened clients pin the returned cert.
 func GenerateSelfSigned(certPath, keyPath string, names []string, now time.Time) (string, error) {
 	if !filepath.IsAbs(certPath) || !filepath.IsAbs(keyPath) || certPath == keyPath {
 		return "", ErrUnsafeTLSPath

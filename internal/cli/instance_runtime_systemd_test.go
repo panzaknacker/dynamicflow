@@ -20,7 +20,7 @@ func TestInstanceRuntimeEnrollInstallsTimerBeforeCredentialOrNetwork(t *testing.
 	installCalls := 0
 	client := newFakeRuntimeClient(fixture)
 	deps := fixture.dependencies(input, func(instanceclient.Config) (instanceRuntimeClient, error) {
-		// the secret is deliberately lazy: client trust is constructed after
+		// The secret is deliberately lazy: client trust is constructed after
 		// the three public/binding fields and before the fourth field is read.
 		if !installed || input.index != 3 {
 			t.Fatalf("network client created before timer/input ordering: installed=%v input=%d", installed, input.index)

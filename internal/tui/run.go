@@ -1,4 +1,4 @@
-// package tui implements dynamicflow's terminal operator surface. it calls
+// Package tui implements Dynamicflow's terminal operator surface. It calls
 // application services directly and never shells out to the CLI.
 package tui
 
@@ -20,14 +20,24 @@ func Run(ctx context.Context, app *application.Application, input io.Reader, out
 	if err != nil {
 		return err
 	}
-	model := newModel(ctx, app, snapshot, environment)
-	program := tea.NewProgram(model,
-		tea.WithContext(ctx),
+	operationContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	model := newModel(operationContext, app, snapshot, environment)
+	var program *tea.Program
+	model.send = func(message tea.Msg) { program.Send(message) }
+	program = tea.NewProgram(model,
+		// Cancelling Bubble Tea's own context kills pending commands before
+		// their durable cleanup can complete. Model.Init observes our operation
+		// context and requests a drain instead.
+		tea.WithFilter(shutdownFilter),
 		tea.WithInput(input),
 		tea.WithOutput(output),
 		tea.WithEnvironment(environment),
 		tea.WithFPS(30),
 	)
 	_, err = program.Run()
+	if err == nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	return err
 }

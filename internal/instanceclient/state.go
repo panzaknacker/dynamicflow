@@ -21,7 +21,7 @@ const (
 
 var ErrInvalidState = errors.New("invalid instance client state")
 
-// State contains only public binding and signed desired-state data. enrollment
+// State contains only public binding and signed desired-state data. Enrollment
 // credentials and private identity material can never be serialized into it.
 type State struct {
 	Schema            int                            `json:"schema"`

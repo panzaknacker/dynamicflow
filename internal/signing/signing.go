@@ -1,5 +1,5 @@
-// package signing implements the small, domain-separated Ed25519 trust root used
-// by dynamicflow manifests and desired-state documents.
+// Package signing implements the small, domain-separated Ed25519 trust root used
+// by Dynamicflow manifests and desired-state documents.
 package signing
 
 import (
@@ -23,10 +23,11 @@ import (
 )
 
 const (
-	privatePEMType = "PRIVATE KEY"
-	publicPEMType  = "PUBLIC KEY"
-	algorithm      = "Ed25519"
-	signatureV1    = 1
+	privatePEMType  = "PRIVATE KEY"
+	publicPEMType   = "PUBLIC KEY"
+	algorithm       = "Ed25519"
+	signatureV1     = 1
+	maxKeyFileBytes = 16 << 10
 )
 
 var (
@@ -36,7 +37,7 @@ var (
 )
 
 // Signature contains no secret material. KeyID is the SHA-256 digest of the
-// PKIX-encoded public key. encoding Signature as JSON represents Value as
+// PKIX-encoded public key. Encoding Signature as JSON represents Value as
 // base64, so the binary signature is never mistaken for display text.
 type Signature struct {
 	Version   int    `json:"version"`
@@ -122,7 +123,7 @@ func ParsePublicPEM(data []byte) (ed25519.PublicKey, error) {
 }
 
 // GenerateFiles creates a new unencrypted PKCS#8 private key with mode 0600
-// and its public PKIX PEM file with mode 0644. existing paths are never
+// and its public PKIX PEM file with mode 0644. Existing paths are never
 // overwritten.
 func GenerateFiles(privatePath, publicPath string) (ed25519.PublicKey, error) {
 	publicKey, privateKey, err := Generate()
@@ -187,6 +188,7 @@ func LoadPrivateFile(path string) (ed25519.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer clear(data)
 	return ParsePrivatePEM(data)
 }
 
@@ -199,27 +201,73 @@ func LoadPublicFile(path string) (ed25519.PublicKey, error) {
 }
 
 func readRegularFile(path string, exactMode os.FileMode, requireExactMode bool) ([]byte, error) {
-	info, err := os.Lstat(path)
+	file, err := openKeyFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("%w: key path is not a regular file", ErrUnsafeKeyFile)
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || !ok || stat.Nlink != 1 || info.Size() <= 0 || info.Size() > maxKeyFileBytes {
+		return nil, fmt.Errorf("%w: key must be a bounded single-link regular file", ErrUnsafeKeyFile)
 	}
 	if requireExactMode && info.Mode().Perm() != exactMode {
 		return nil, fmt.Errorf("%w: private key mode must be 0600", ErrUnsafeKeyFile)
 	}
-	if requireExactMode {
-		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || int(stat.Uid) != os.Geteuid() {
-			return nil, fmt.Errorf("%w: private key has wrong owner", ErrUnsafeKeyFile)
-		}
+	if requireExactMode && int(stat.Uid) != os.Geteuid() {
+		return nil, fmt.Errorf("%w: private key has wrong owner", ErrUnsafeKeyFile)
 	}
-	data, err := os.ReadFile(path)
+	if info.Mode().Perm()&0o022 != 0 {
+		return nil, fmt.Errorf("%w: key is writable by another user", ErrUnsafeKeyFile)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxKeyFileBytes+1))
+	if err != nil {
+		clear(data)
+		return nil, err
+	}
+	if len(data) > maxKeyFileBytes {
+		clear(data)
+		return nil, fmt.Errorf("%w: key exceeds its size bound", ErrUnsafeKeyFile)
+	}
+	return data, nil
+}
+
+// openKeyFile pins each directory descriptor before opening its child. No
+// parent or final symlink is followed, and a substituted FIFO cannot block
+// before the caller verifies the descriptor's type, owner and link count.
+func openKeyFile(path string) (*os.File, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil || absolute == string(filepath.Separator) || strings.IndexByte(path, 0) >= 0 {
+		return nil, ErrUnsafeKeyFile
+	}
+	parts := strings.Split(strings.TrimPrefix(absolute, string(filepath.Separator)), string(filepath.Separator))
+	current, err := syscall.Open(string(filepath.Separator), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
 	}
-	return data, nil
+	defer func() { _ = syscall.Close(current) }()
+	for _, part := range parts[:len(parts)-1] {
+		next, err := syscall.Openat(current, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
+				return nil, ErrUnsafeKeyFile
+			}
+			return nil, err
+		}
+		_ = syscall.Close(current)
+		current = next
+	}
+	fd, err := syscall.Openat(current, parts[len(parts)-1], syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, ErrUnsafeKeyFile
+		}
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), absolute), nil
 }
 
 func ensureSecureKeyDirectory(path string) error {
@@ -262,7 +310,7 @@ func syncDirectory(path string) error {
 	return directory.Sync()
 }
 
-// CanonicalJSON emits the deterministic JSON subset used by dynamicflow. map
+// CanonicalJSON emits the deterministic JSON subset used by Dynamicflow. Map
 // keys are sorted, integer spellings are normalized, and fractional/floating
 // point numbers are rejected to avoid cross-runtime ambiguity.
 func CanonicalJSON(value any) ([]byte, error) {

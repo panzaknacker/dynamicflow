@@ -1,5 +1,5 @@
-// package workflow persists resumable, security-gated dynamicflow operations.
-// snapshots are authoritative; the append-only event stream is diagnostic.
+// Package workflow persists resumable, security-gated Dynamicflow operations.
+// Snapshots are authoritative; the append-only event stream is diagnostic.
 package workflow
 
 import (
@@ -61,7 +61,7 @@ type Resource struct {
 	Name string `json:"name"`
 }
 
-// KeyReference contains public metadata only. it deliberately has no path or
+// KeyReference contains public metadata only. It deliberately has no path or
 // byte field capable of serializing private key material.
 type KeyReference struct {
 	Scope       sshkeys.Scope `json:"scope"`

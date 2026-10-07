@@ -1,11 +1,11 @@
-// package sshtransport builds the four explicitly supported SSH transports:
+// Package sshtransport builds the four explicitly supported SSH transports:
 // the one-time direct bootstrap of the first control, the pre-ready proof of a
 // staged management identity, the permanent direct management connection to a
 // verified ready control, and an end-to-end target connection routed through
 // that control.
-
-// the package writes only managed OpenSSH configuration and known-hosts files.
-// it never starts SSH, invokes a shell, or provides a direct-target fallback.
+//
+// The package writes only managed OpenSSH configuration and known-hosts files.
+// It never starts SSH, invokes a shell, or provides a direct-target fallback.
 package sshtransport
 
 import (
@@ -55,14 +55,14 @@ type Capability string
 const CapabilityFirstControlBootstrap Capability = "first_control_bootstrap"
 
 // PendingControlProofCapability is deliberately not assignment-compatible
-// with either the one-time bootstrap Capability or ReadyControlCapability. it
+// with either the one-time bootstrap Capability or ReadyControlCapability. It
 // authorizes only construction of the pre-ready management-key proof path.
 type PendingControlProofCapability uint16
 
 const CapabilityPendingControlProof PendingControlProofCapability = 0x5043
 
 // ReadyControlCapability is deliberately not assignment-compatible with the
-// first-Control bootstrap Capability. it authorizes only the direct
+// first-Control bootstrap Capability. It authorizes only the direct
 // management path to a Control whose ready state was verified by the caller.
 type ReadyControlCapability uint8
 
@@ -73,7 +73,7 @@ const CapabilityVerifiedReadyControl ReadyControlCapability = 1
 const ReadyControlUser = "dynamicflow-control"
 
 // PendingControlPhase is an explicit lifecycle assertion supplied by the
-// authoritative caller. the pending proof transport rejects the ready phase
+// authoritative caller. The pending proof transport rejects the ready phase
 // and the zero value rather than silently treating either as pre-ready.
 type PendingControlPhase string
 
@@ -88,14 +88,14 @@ const (
 	RoleTarget  EndpointRole = "target"
 )
 
-// PrivateIdentity wraps a validated local private-key path. its path is
+// PrivateIdentity wraps a validated local private-key path. Its path is
 // intentionally unavailable to encoding/json and is revalidated at build time.
 type PrivateIdentity struct {
 	path string
 }
 
 // NewPrivateIdentity validates a local private-key file without reading its
-// contents. the file must remain an owner-only, single-link regular file.
+// contents. The file must remain an owner-only, single-link regular file.
 func NewPrivateIdentity(path string) (PrivateIdentity, error) {
 	if _, err := validatePrivateIdentity(path); err != nil {
 		return PrivateIdentity{}, err
@@ -141,7 +141,7 @@ type ReadyControl struct {
 
 // PendingControlProof binds the staged management identity to the exact
 // already-pinned Control host while that Control is explicitly not ready.
-// BootstrapIdentityFingerprint is public comparison material only. the
+// BootstrapIdentityFingerprint is public comparison material only. The
 // private management-key path remains non-serializable through Endpoint.
 type PendingControlProof struct {
 	Control                      Endpoint            `json:"control"`
@@ -150,7 +150,7 @@ type PendingControlProof struct {
 	Phase                        PendingControlPhase `json:"phase"`
 }
 
-// Invocation is an immutable SSH argv prefix. callers may append only their
+// Invocation is an immutable SSH argv prefix. Callers may append only their
 // explicit remote command after Arguments; transport options stay managed.
 type Invocation struct {
 	arguments   []string
@@ -174,7 +174,7 @@ func NewBuilder(store *localstate.Store) *Builder {
 }
 
 // BuildDirectFirstControl is the sole direct path that may use the bootstrap
-// identity before the Control runtime is installed. it requires the literal
+// identity before the Control runtime is installed. It requires the literal
 // one-shot bootstrap capability and can only target a control endpoint.
 func (builder *Builder) BuildDirectFirstControl(capability Capability, control Endpoint) (Invocation, error) {
 	if capability != CapabilityFirstControlBootstrap {
@@ -189,13 +189,13 @@ func (builder *Builder) BuildDirectFirstControl(capability Capability, control E
 }
 
 // BuildDirectPendingControlProof builds the sole pre-ready connection that may
-// authenticate with a staged Control management key. it reuses the exact
+// authenticate with a staged Control management key. It reuses the exact
 // independently pinned Control host identity, fixes the remote user to
 // dynamicflow-control, and rejects reuse of the bootstrap identity.
-
-// the result is only an argv prefix in a separate content-addressed namespace.
-// this method does not start a process, add a command, configure a jump, or
-// permit forwarding. the caller must later append its fixed attestation
+//
+// The result is only an argv prefix in a separate content-addressed namespace.
+// This method does not start a process, add a command, configure a jump, or
+// permit forwarding. The caller must later append its fixed attestation
 // command, which the installed remote ForceCommand mediates.
 func (builder *Builder) BuildDirectPendingControlProof(capability PendingControlProofCapability, pending PendingControlProof) (Invocation, error) {
 	if capability != CapabilityPendingControlProof {
@@ -223,12 +223,12 @@ func (builder *Builder) BuildDirectPendingControlProof(capability PendingControl
 }
 
 // BuildDirectReadyControl builds the permanent operator-to-Control management
-// transport. its distinct capability and ReadyControl input cannot be
-// accidentally substituted for the one-time bootstrap API. the endpoint must
+// transport. Its distinct capability and ReadyControl input cannot be
+// accidentally substituted for the one-time bootstrap API. The endpoint must
 // use the fixed unprivileged management account, an independently pinned
 // Ed25519 host key, and a local management identity distinct from bootstrap.
-
-// this method only writes managed files. it never starts ssh, a shell, or any
+//
+// This method only writes managed files. It never starts ssh, a shell, or any
 // other process.
 func (builder *Builder) BuildDirectReadyControl(capability ReadyControlCapability, ready ReadyControl) (Invocation, error) {
 	if capability != CapabilityVerifiedReadyControl {
@@ -253,7 +253,7 @@ func (builder *Builder) BuildDirectReadyControl(capability ReadyControlCapabilit
 }
 
 // BuildRoutedTarget creates an end-to-end target transport whose only jump is
-// the managed control alias. there is deliberately no direct-target API.
+// the managed control alias. There is deliberately no direct-target API.
 func (builder *Builder) BuildRoutedTarget(route Route) (Invocation, error) {
 	control, err := validateEndpoint(route.Control, RoleControl)
 	if err != nil {
@@ -276,7 +276,7 @@ func (builder *Builder) BuildRoutedTarget(route Route) (Invocation, error) {
 	)
 }
 
-// WithVNCForward enables exactly one final-target loopback forward. it cannot
+// WithVNCForward enables exactly one final-target loopback forward. It cannot
 // be applied to the direct control bootstrap or widened to another address.
 func WithVNCForward(invocation Invocation, localPort int) (Invocation, error) {
 	if !invocation.routed || invocation.vnc || localPort < 1024 || localPort > 65535 ||
@@ -516,11 +516,11 @@ func safeHost(host string) bool {
 		}
 	}
 	if numeric {
-		// avoid libc/OpenSSH legacy numeric-address interpretations such as
+		// Avoid libc/OpenSSH legacy numeric-address interpretations such as
 		// one-component IPv4 or octal-looking dotted forms.
 		return false
 	}
-	// Endpoint hosts are already canonicalized by topology. retaining the same
+	// Endpoint hosts are already canonicalized by topology. Retaining the same
 	// conservative ASCII grammar here prevents ssh_config token injection.
 	if strings.HasSuffix(host, ".") || host != strings.ToLower(host) {
 		return false
@@ -559,6 +559,6 @@ func quoteConfigPath(path string) string {
 	return `"` + replacer.Replace(path) + `"`
 }
 
-// ensure compile-time enforcement that the private path cannot silently gain a
+// Ensure compile-time enforcement that the private path cannot silently gain a
 // default JSON representation through future field exports.
 var _ json.Marshaler = PrivateIdentity{}

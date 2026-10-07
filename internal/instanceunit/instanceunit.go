@@ -1,5 +1,5 @@
-// package instanceunit installs the narrow, pull-only target reconciliation
-// systemd service.  the service has no generic command or job input: its sole
+// Package instanceunit installs the narrow, pull-only target reconciliation
+// systemd service.  The service has no generic command or job input: its sole
 // entry point fetches and applies the instance's signed desired state over the
 // already pinned outbound HTTPS client.
 package instanceunit
@@ -39,7 +39,7 @@ type installer struct {
 
 // Install reconciles and enables the fixed root one-shot timer. StateRoot is
 // accepted for isolated tests and recovery layouts, but must be a safe absolute
-// path. the production bootstrap always supplies DefaultStateRoot.
+// path. The production bootstrap always supplies DefaultStateRoot.
 func Install(stateRoot string) (bool, error) {
 	return (installer{
 		executable: DefaultExecutable,
@@ -100,7 +100,7 @@ func (configuration installer) install() (bool, error) {
 			return changed, err
 		}
 	}
-	// always reconcile enablement. this repairs a disabled timer without
+	// Always reconcile enablement. This repairs a disabled timer without
 	// rewriting either unit and is safe on repeated enroll recovery runs.
 	if err := configuration.run("enable", "--now", TimerName); err != nil {
 		return changed, err

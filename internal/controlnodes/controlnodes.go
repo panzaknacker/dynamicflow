@@ -1,5 +1,5 @@
-// package controlnodes persists the operator-local binding for a system's
-// control node. it validates trust material but deliberately never opens a
+// Package controlnodes persists the operator-local binding for a system's
+// control node. It validates trust material but deliberately never opens a
 // network connection or executes an SSH client.
 package controlnodes
 
@@ -46,6 +46,10 @@ var (
 
 const ManagementAccessUser = "dynamicflow-control"
 
+// ValidName reports the name grammar shared by Control records, signed policy
+// and their fixed SSH command bindings. Bootstrap must use it before keygen.
+func ValidName(name string) bool { return nodeNameRE.MatchString(name) }
+
 // OperatingSystem identifies the narrowly supported control-node base image.
 type OperatingSystem string
 
@@ -55,7 +59,7 @@ const (
 )
 
 // EvidenceSource records the independent channel through which the initial
-// SSH host public key was authenticated. a network observation is not valid
+// SSH host public key was authenticated. A network observation is not valid
 // evidence and is intentionally absent from this enum.
 type EvidenceSource string
 
@@ -64,7 +68,7 @@ const (
 	EvidenceProviderAttestation EvidenceSource = "provider-attestation"
 )
 
-// Lifecycle is monotonic. revoked is a terminal fail-closed state reachable
+// Lifecycle is monotonic. Revoked is a terminal fail-closed state reachable
 // from every other state.
 type Lifecycle string
 
@@ -77,7 +81,7 @@ const (
 )
 
 // AccessPhase identifies which exact owner-local identity is authoritative.
-// staged never changes the active Bootstrap identity.
+// Staged never changes the active Bootstrap identity.
 type AccessPhase string
 
 const (
@@ -86,7 +90,7 @@ const (
 	AccessManagement AccessPhase = "management"
 )
 
-// AccessKeyRef pins one exact public SSH-key generation. it contains no path
+// AccessKeyRef pins one exact public SSH-key generation. It contains no path
 // or private key bytes.
 type AccessKeyRef struct {
 	Scope       sshkeys.Scope `json:"scope"`
@@ -191,7 +195,7 @@ type Manager struct {
 	now   func() time.Time
 }
 
-// NewManager creates a local-only manager. it does not inspect an endpoint or
+// NewManager creates a local-only manager. It does not inspect an endpoint or
 // perform any network operation.
 func NewManager(store *localstate.Store, keys *sshkeys.Manager, options ...Option) (*Manager, error) {
 	if store == nil || keys == nil {
@@ -209,7 +213,7 @@ func NewManager(store *localstate.Store, keys *sshkeys.Manager, options ...Optio
 	return manager, nil
 }
 
-// Bind creates an immutable system-local endpoint and host-trust binding. an
+// Bind creates an immutable system-local endpoint and host-trust binding. An
 // exact repeat is an idempotent read; any changed immutable value fails closed.
 func (manager *Manager) Bind(input BindInput) (result Record, created bool, err error) {
 	normalized, err := manager.normalizeBindInput(input)
@@ -299,7 +303,7 @@ func (manager *Manager) List(systemID string) ([]Record, error) {
 	} else if err != nil {
 		return nil, fmt.Errorf("inspect control-node directory: %w", err)
 	}
-	// EnsureDir is also the localstate directory validator. the existence check
+	// EnsureDir is also the localstate directory validator. The existence check
 	// above keeps this read-only path from creating an absent directory.
 	directory, err = manager.store.EnsureDir(controlsRelative(systemID))
 	if err != nil {
@@ -324,7 +328,7 @@ func (manager *Manager) List(systemID string) ([]Record, error) {
 	return records, nil
 }
 
-// Transition compare-and-swaps one strictly forward lifecycle step. revocation
+// Transition compare-and-swaps one strictly forward lifecycle step. Revocation
 // is an explicit terminal transition available from every non-revoked state.
 func (manager *Manager) Transition(systemID, name string, expectedRevision uint64, next Lifecycle) (result Record, err error) {
 	if err := validateIdentity(systemID, name); err != nil || expectedRevision == 0 {
@@ -379,8 +383,8 @@ func (manager *Manager) Transition(systemID, name string, expectedRevision uint6
 }
 
 // Stage compare-and-swaps an exact active sshkeys.Control generation into the
-// pending slot with the dedicated access user. the authoritative Access pair
-// remains Bootstrap. replaying the same pair is an idempotent read; a different
+// pending slot with the dedicated access user. The authoritative Access pair
+// remains Bootstrap. Replaying the same pair is an idempotent read; a different
 // pending key or user conflicts.
 func (manager *Manager) Stage(systemID, name string, expectedRevision uint64, controlKey AccessKeyRef, accessUser string) (result Record, staged bool, err error) {
 	if err := validateIdentity(systemID, name); err != nil || expectedRevision == 0 ||
@@ -460,7 +464,7 @@ func (manager *Manager) Stage(systemID, name string, expectedRevision uint64, co
 
 // Activate atomically switches Access from Bootstrap to the exact staged
 // Control identity only after external proof, explicit target-side bootstrap
-// revocation confirmation and matching local bootstrap revocation. no previous
+// revocation confirmation and matching local bootstrap revocation. No previous
 // identity fallback is retained.
 func (manager *Manager) Activate(systemID, name string, expectedRevision uint64, confirmation ActivationConfirmation) (result Record, activated bool, err error) {
 	if err := validateIdentity(systemID, name); err != nil || expectedRevision == 0 ||
@@ -565,7 +569,7 @@ func (manager *Manager) AccessMaterial(systemID, name string) (AccessMaterial, e
 }
 
 // PendingAccessMaterial resolves only the exact staged Control identity for a
-// later explicit proof connection. it never falls back to the active Bootstrap
+// later explicit proof connection. It never falls back to the active Bootstrap
 // identity and is unavailable before Stage or after Activate.
 func (manager *Manager) PendingAccessMaterial(systemID, name string) (AccessMaterial, error) {
 	record, err := manager.Get(systemID, name)

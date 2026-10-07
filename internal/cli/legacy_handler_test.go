@@ -10,9 +10,9 @@ import (
 )
 
 // invokeInternalLegacyHandlerForTest exercises implementation details that are
-// retained for migration into signed via-control transports. it intentionally
-// does not call run and therefore cannot bypass the production argv gate.
-// public contract tests must always use invokeCLI instead.
+// retained for migration into signed via-Control transports. It intentionally
+// does not call Run and therefore cannot bypass the production argv gate.
+// Public contract tests must always use invokeCLI instead.
 func invokeInternalLegacyHandlerForTest(t *testing.T, arguments ...string) (int, string, string) {
 	t.Helper()
 	global, args, err := parseGlobal(arguments)

@@ -183,8 +183,8 @@ func TestLinuxInstallerRetryReloadsAfterCrashFollowingFinalRename(t *testing.T) 
 	if err := staged.Activate(); err != nil {
 		t.Fatal(err)
 	}
-	// simulate abrupt process death: close descriptors without commit,
-	// rollback or reload. the next invocation must not mistake exact files for
+	// Simulate abrupt process death: close descriptors without Commit,
+	// Rollback or Reload. The next invocation must not mistake exact files for
 	// a completed activation.
 	if err := staged.(*linuxTransaction).close(); err != nil {
 		t.Fatal(err)

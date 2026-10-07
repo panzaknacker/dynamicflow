@@ -1,8 +1,8 @@
-// package topology models the operator-local SSH access graph.
-
-// a topology has exactly one directly reachable control node. once that
+// Package topology models the operator-local SSH access graph.
+//
+// A topology has exactly one directly reachable control node. Once that
 // control is ready, every target must be reached through a fingerprint-bound
-// route which ultimately terminates at the control. the package only manages
+// route which ultimately terminates at the control. The package only manages
 // local state; it never opens a network connection or executes a process.
 package topology
 
@@ -82,7 +82,7 @@ type Control struct {
 }
 
 // Target describes one managed SSH endpoint. DirectHost is present only
-// during the pre-control bootstrap phase. a control-routed target obtains its
+// during the pre-control bootstrap phase. A control-routed target obtains its
 // destination from exactly one Route.
 type Target struct {
 	Name               string     `json:"name"`
@@ -95,7 +95,7 @@ type Target struct {
 }
 
 // Route binds a target management address to both ends of the trust path.
-// Via names either the control or another control-routed target. every chain
+// Via names either the control or another control-routed target. Every chain
 // must be acyclic and terminate at the topology's control.
 type Route struct {
 	Target             string `json:"target"`
@@ -295,7 +295,7 @@ func validateRouteGraph(controlName string, targets map[string]Target, routes ma
 		}
 		switch route.Via {
 		case controlName:
-			// the chain terminates only at the one pinned control.
+			// The chain terminates only at the one pinned control.
 		default:
 			via, exists := targets[route.Via]
 			if !exists || via.Access != AccessControl {
@@ -316,8 +316,8 @@ func validateRouteGraph(controlName string, targets map[string]Target, routes ma
 	return nil
 }
 
-// Save validates and atomically persists document. changed documents advance
-// exactly one generation. re-saving an identical document is idempotent.
+// Save validates and atomically persists document. Changed documents advance
+// exactly one generation. Re-saving an identical document is idempotent.
 func (store *Store) Save(document Topology) error {
 	if store == nil || store.local == nil {
 		return invalid(nil, "local state store is unavailable")

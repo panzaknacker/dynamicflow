@@ -72,7 +72,7 @@ func (executor *labSSHExecutor) Run(ctx context.Context, host lab.Host, action l
 	err = command.Run()
 	if err != nil {
 		// systemctl may close the SSH transport immediately after it accepted
-		// the fixed reboot request. the pre-close acknowledgement is the only
+		// the fixed reboot request. The pre-close acknowledgement is the only
 		// error-path output accepted by this action; readiness is checked later.
 		if action == lab.ActionReboot && strings.TrimSpace(stdout.String()) == "reboot-requested" {
 			fields["transport_closed_after_ack"] = true

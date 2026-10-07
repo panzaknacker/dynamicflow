@@ -25,7 +25,7 @@ func instanceManager(ctx *commandContext) *instances.Manager {
 }
 
 // instanceSSHArgs binds use of the previous private generation to the
-// operator's local desired-state rotation checkpoint. the low-level instance
+// operator's local desired-state rotation checkpoint. The low-level instance
 // manager defaults to the active key only, so stale private generations can
 // never be offered merely because they remain in the audit-preserving key
 // store.
@@ -431,8 +431,8 @@ func instanceSecret(ctx *commandContext, args []string) int {
 	if err := audit(ctx, "instance.secret."+action, "started", map[string]any{"instance": name, "secret": "vnc"}); err != nil {
 		return ctx.out.fail("audit_unavailable", "local audit event could not be committed; secret access was not started", "Repair the private audit log and retry.", exitFailure)
 	}
-	// the remote argv is intentionally fixed and contains neither the
-	// credential nor a caller-controlled command. the target binary performs
+	// The remote argv is intentionally fixed and contains neither the
+	// credential nor a caller-controlled command. The target binary performs
 	// all filesystem and service work in its root-only one-shot.
 	sshArgs = append(sshArgs, "sudo", "-n", "/usr/local/bin/flow", "instance-runtime", "secret", action, "--secret", "vnc")
 	command := exec.Command("ssh", sshArgs...)

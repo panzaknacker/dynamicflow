@@ -32,7 +32,7 @@ func TestDesiredStoreVerifiesSignatureReleaseExpiryAndGeneration(t *testing.T) {
 	if err := store.Put(first, releaseSet, now, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	// exact retries are idempotent.
+	// Exact retries are idempotent.
 	if err := store.Put(first, releaseSet, now, time.Minute); err != nil {
 		t.Fatalf("idempotent retry: %v", err)
 	}

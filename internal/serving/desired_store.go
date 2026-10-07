@@ -17,7 +17,7 @@ import (
 	"dynamicflow/internal/signing"
 )
 
-// DesiredStore holds only operator-signed desired-state documents. the
+// DesiredStore holds only operator-signed desired-state documents. The
 // serving process receives the verification key, never the corresponding
 // private signing key.
 type DesiredStore struct {
@@ -89,7 +89,7 @@ func (store *DesiredStore) Get(instance string) (enrollment.SignedDesiredState, 
 	if err != nil {
 		return enrollment.SignedDesiredState{}, err
 	}
-	// verify the signature and structural binding on every disk read. full
+	// Verify the signature and structural binding on every disk read. Full
 	// release/freshness expectations are applied by the serving handler.
 	if err := enrollment.VerifyDesiredState(signed, store.publicKey, enrollment.DesiredExpectation{
 		Instance: instance, Profile: signed.State.Profile, MinGeneration: 1,
@@ -101,7 +101,7 @@ func (store *DesiredStore) Get(instance string) (enrollment.SignedDesiredState, 
 }
 
 // WithControlTransaction serializes the enrollment/desired compound update
-// across goroutines and serving processes. the callback must not invoke this
+// across goroutines and serving processes. The callback must not invoke this
 // method recursively.
 func (store *DesiredStore) WithControlTransaction(callback func() error) error {
 	store.controlMu.Lock()

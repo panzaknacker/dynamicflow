@@ -34,8 +34,8 @@ func (control *labControlPlane) RotateSSHKey(operation context.Context, host lab
 	if err != nil || active.Status != sshkeys.ActiveStatus {
 		return 0, errors.New("dedicated instance key is unavailable")
 	}
-	// a previous interrupted lab may already have rotated locally or published
-	// the overlap generation. resume it; never manufacture another generation.
+	// A previous interrupted lab may already have rotated locally or published
+	// the overlap generation. Resume it; never manufacture another generation.
 	if active.Generation == local.KeyGeneration && !local.RotationPending {
 		if status := runLabNested(control.ctx, func(nested *commandContext) int {
 			return commandKey(nested, []string{"rotate", "--name", local.KeyName, "--scope", string(sshkeys.Instance)})

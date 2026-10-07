@@ -1,4 +1,4 @@
-// package cli implements dynamicflow's single operator command surface.
+// Package cli implements Dynamicflow's single operator command surface.
 package cli
 
 import (
@@ -74,19 +74,36 @@ func RunWithIO(arguments []string, stdin io.Reader, stdout, stderr io.Writer) in
 	if topic, text, ok := commandLeafHelp(args); ok {
 		return emitHelp(emit, topic, text)
 	}
-	// the systemd serving entry point consumes only an absolute, root-created
+	// Raw runtime adapters have their own emitters. Reject unknown actions
+	// here so failure IDs remain bound to the normalized public action path.
+	if len(args) > 1 && (args[0] == "instance-runtime" || args[0] == "control-runtime") && emit.command == args[0] && !isRuntimeHelp(args[1]) {
+		return emit.fail("usage", "unknown "+args[0]+" command", "Run flow "+args[0]+" --help.", exitUsage)
+	}
+	// The systemd serving entry point consumes only an absolute, root-created
 	// config and deliberately does not open operator-local state.
 	if len(args) > 0 && args[0] == "serve" {
 		return commandServeRaw(args[1:], stdout, stderr, global.json)
 	}
-	// target-runtime commands must never inspect FLOW_HOME, operator keys,
-	// profiles, or source state. their complete public configuration is passed
+	// Target-runtime commands must never inspect FLOW_HOME, operator keys,
+	// profiles, or source state. Their complete public configuration is passed
 	// explicitly and credentials come only from TTY/stdin.
 	if len(args) > 0 && args[0] == "instance-runtime" {
 		if global.home != "" || global.sourceRoot != "" {
 			return emit.fail("usage", "--home and --source-root are not valid for instance-runtime", "Use --state-root for target state.", exitUsage)
 		}
 		return commandInstanceRuntimeRaw(args[1:], stdout, stderr, global.json)
+	}
+	// The privileged installer and sshd ForceCommand consume only their fixed
+	// public binding and stdin/SSH context. They must never open operator state
+	// or discover profiles, even when FLOW_HOME points to an unsafe location.
+	if len(args) > 0 && args[0] == "control-runtime" {
+		if global.home != "" || global.sourceRoot != "" {
+			return emit.fail("usage", "operator state options are not valid for control-runtime", "Run flow control-runtime --help.", exitUsage)
+		}
+		if len(args) > 1 && args[1] == "session" && global.json {
+			return emit.fail("usage", "control-runtime session uses a fixed attestation protocol", "Use the installer-owned ForceCommand without global options.", exitUsage)
+		}
+		return commandControlRuntimeRaw(args[1:], stdin, stdout, stderr, global.json)
 	}
 	if topic, requested := requestedHelpTopic(args); requested {
 		return emit.fail("usage", "unknown help topic: "+topic, "Run flow --help.", exitUsage)
@@ -184,7 +201,7 @@ func interactiveTerminal(input io.Reader, output io.Writer) bool {
 
 // requestedCommandID keeps JSON failures as easy to route as successful
 // envelopes without ever including instance names, remote argv or option
-// values. the returned identifier describes only the fixed CLI action path.
+// values. The returned identifier describes only the fixed CLI action path.
 func requestedCommandID(arguments []string) string {
 	if len(arguments) == 0 {
 		return "flow"
@@ -352,9 +369,9 @@ func commandGroupHelp(arguments []string) (string, bool) {
 }
 
 // commandLeafHelp recognizes only complete, public command paths followed
-// immediately by a help flag. keeping this allowlist ahead of operator-state
+// immediately by a help flag. Keeping this allowlist ahead of operator-state
 // initialization makes leaf help state-free, while unknown leaves remain
-// ordinary usage errors. a help-looking remote argument after the literal
+// ordinary usage errors. A help-looking remote argument after the literal
 // instance-exec separator is deliberately not a local help request.
 func commandLeafHelp(arguments []string) (string, string, bool) {
 	if len(arguments) < 3 {
@@ -380,11 +397,16 @@ func commandLeafHelp(arguments []string) (string, string, bool) {
 
 var commandLeafHelpGroups = map[string]string{
 	"system.init":             "system",
+	"system.select":           "system",
 	"system.status":           "system",
 	"control.bind":            "control",
 	"control.check":           "control",
 	"control.install":         "control",
+	"control.apply":           "control",
+	"control.attest":          "control",
 	"control.status":          "control",
+	"control-runtime.install": "control-runtime",
+	"control-runtime.session": "control-runtime",
 	"serving.configure":       "serving",
 	"serving.show":            "serving",
 	"start.serving":           "start",
@@ -419,21 +441,33 @@ var commandLeafHelpGroups = map[string]string{
 }
 
 var commandGroupHelpText = map[string]string{
+	"control-runtime": controlRuntimeHelpText,
 	"system": `Usage:
 	  flow system init --name NAME [--control-name NAME] [--plan]
+  flow system select NAME_OR_ID [--plan] [--expect-revision N]
   flow system status
 
 Create or resume a provider-independent system and its first Control bootstrap.
 Only the public bootstrap key is returned; VM host trust must be confirmed out
-of band before connectivity is attempted.
+of band before connectivity is attempted. Creating another system keeps the
+current selection. Select changes only the local active context and is blocked
+while either system has a running Control operation. --expect-revision binds
+selection to a previously displayed registry revision. Prefix an ID with id:
+to disambiguate it from another system's name.
+The first-Control name must start with a lowercase letter and contain only
+lowercase letters, digits or hyphens (1-63 characters). After the first Control
+endpoint is bound, initialization is complete; select the existing system and
+use flow control status to resume its recorded workflow.
 `,
 	"control": `Usage:
   flow control bind NAME --host HOST --ssh-user USER
       --os debian-13|ubuntu-24.04 --hostkey-file ABS
       --evidence provider-console|provider-attestation
-      [--ssh-port PORT] [--plan]
-  flow control check NAME [--plan]
-  flow control install NAME [--plan]
+      [--ssh-port PORT] [--plan] [--expect-system SYS_ID]
+  flow control check NAME [--plan] [--expect-system SYS_ID]
+  flow control install NAME [--plan] [--expect-system SYS_ID]
+  flow control apply NAME [--plan] [--expect-system SYS_ID]
+  flow control attest NAME [--plan] [--expect-system SYS_ID]
   flow control status
 
 Bind records only independently verified local host trust and performs no
@@ -442,6 +476,17 @@ route with fixed /bin/true and has no retry, fallback or arbitrary command.
 Install prepares a signed generation-1 route-free local checkpoint with zero
 network connections. It does not install the remote node and never marks
 Control ready. --plan validates and previews without changing state.
+Apply streams the prepared signed policy and this flow executable through one
+pinned first-Control bootstrap session. It installs the remote runtime and
+records evidence; management-key proof and bootstrap revocation remain separate
+gates. Apply does not mark Control ready and has no automatic retry or fallback.
+Attest performs one pinned challenge-response session with the staged management
+key. It verifies the exact installed policy and saves a public proof receipt.
+It never uses the bootstrap key as a fallback or marks Control ready.
+All five operations accept --expect-system SYS_ID in plans and execution.
+Carry system_id from the confirmed plan to reject a changed active system
+before any mutation or connection. This flag verifies selection; it does not
+select a system or freeze every other field of a plan.
 `,
 	"init": `Usage:
   flow init
@@ -546,13 +591,17 @@ Usage:
 
 Core:
 	  flow system init --name NAME      Create/resume a system and first Control key; --plan previews
+  flow system select NAME_OR_ID    Select the local active system; --plan previews
   flow system status                Show active system, Control gate and tasks
   flow control bind NAME --host HOST --ssh-user USER --os OS --hostkey-file ABS --evidence SOURCE [--plan]
                                      Pin the first Control endpoint and OOB-verified Ed25519 host key
   flow control check NAME [--plan]  Run one direct pinned /bin/true connectivity check; no retry or fallback
   flow control install NAME [--plan]
                                      Prepare the local signed route-free install checkpoint; 0 network, not ready
+  flow control apply NAME [--plan]  Install the prepared runtime through one pinned bootstrap session; not ready
+  flow control attest NAME [--plan] Prove staged management access and the installed policy; not ready
   flow control status               Show the active system's Control binding, task and topology
+    Control plans and actions accept --expect-system SYS_ID to reject a changed active system.
   flow dashboard                    Print the noninteractive dashboard snapshot
   flow init                         Initialize private operator state and trust roots
   flow doctor                       Validate tools, permissions, profiles and trust roots

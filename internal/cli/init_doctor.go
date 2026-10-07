@@ -144,6 +144,9 @@ func commandDoctor(ctx *commandContext, args []string) int {
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return usage(ctx, "usage: flow doctor")
 	}
+	if status, handled := doctorSystem(ctx); handled {
+		return status
+	}
 	checks := []doctorCheck{}
 	add := func(name string, err error, success string) {
 		check := doctorCheck{Name: name, OK: err == nil, Detail: success}

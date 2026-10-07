@@ -1,5 +1,5 @@
-// package netpolicy makes fail-closed transport decisions for dynamicflow's
-// operator and managed-node network paths. it selects a mode but never opens a
+// Package netpolicy makes fail-closed transport decisions for Dynamicflow's
+// operator and managed-node network paths. It selects a mode but never opens a
 // connection, resolves a host, executes a command, or performs a fallback.
 package netpolicy
 
@@ -43,6 +43,7 @@ type Action string
 const (
 	ActionFirstControlCheck  Action = "first_control_check"
 	ActionControlInstall     Action = "control_install"
+	ActionControlAttest      Action = "control_attest"
 	ActionServingBootstrap   Action = "serving_bootstrap"
 	ActionInstanceBootstrap  Action = "instance_bootstrap"
 	ActionDesiredStateUpdate Action = "desired_state_update"
@@ -60,6 +61,7 @@ type Mode string
 
 const (
 	ModeDirectFirstControl Mode = "direct_first_control"
+	ModeDirectControlProof Mode = "direct_pending_control"
 	ModeViaControl         Mode = "via_control"
 	ModeOutboundHTTPSPull  Mode = "outbound_https_pull"
 	ModeProviderConsole    Mode = "provider_console"
@@ -80,6 +82,7 @@ type Reason string
 
 const (
 	ReasonAllowFirstControl         Reason = "allow_first_control"
+	ReasonAllowControlProof         Reason = "allow_pending_control_proof"
 	ReasonAllowViaControl           Reason = "allow_via_control"
 	ReasonAllowOutboundHTTPSPull    Reason = "allow_outbound_https_pull"
 	ReasonAllowProviderRecovery     Reason = "allow_provider_recovery"
@@ -133,7 +136,7 @@ type VNCMetadata struct {
 }
 
 // Input is a public-metadata-only snapshot evaluated as one indivisible policy
-// request. it has no fields for hosts, private paths, secrets, or commands.
+// request. It has no fields for hosts, private paths, secrets, or commands.
 type Input struct {
 	SystemID       string
 	Source         Actor
@@ -148,7 +151,7 @@ type Input struct {
 	VNC            VNCMetadata
 }
 
-// Decision is immutable outside this package. use Allowed, Mode, and Reason
+// Decision is immutable outside this package. Use Allowed, Mode, and Reason
 // for enforcement; MarshalJSON exposes only bounded public audit metadata.
 type Decision struct {
 	schema                     int
@@ -169,7 +172,7 @@ type Decision struct {
 	reason                     Reason
 }
 
-// Allowed reports whether the exact input is authorized. a zero or malformed
+// Allowed reports whether the exact input is authorized. A zero or malformed
 // Decision always reports false.
 func (decision Decision) Allowed() bool {
 	return validDecision(decision) && decision.allowed
@@ -193,7 +196,7 @@ func (decision Decision) Reason() Reason {
 	return decision.reason
 }
 
-// MarshalJSON emits a fixed public audit surface. invalid Decision values are
+// MarshalJSON emits a fixed public audit surface. Invalid Decision values are
 // sanitized to an anonymous denied decision instead of echoing bad data.
 func (decision Decision) MarshalJSON() ([]byte, error) {
 	if !validDecision(decision) {
@@ -232,7 +235,7 @@ func (decision Decision) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// Decide validates one complete request and returns exactly one mode. invalid
+// Decide validates one complete request and returns exactly one mode. Invalid
 // input returns a denied decision as well as an error, so ignoring the error
 // cannot accidentally authorize a path.
 func Decide(input Input) (Decision, error) {
@@ -241,7 +244,7 @@ func Decide(input Input) (Decision, error) {
 	}
 	decision := decisionFor(input)
 
-	// this absolute invariant is evaluated before every other policy branch.
+	// This absolute invariant is evaluated before every other policy branch.
 	if input.Source == ActorServing && input.Destination == ActorInstance {
 		return deny(decision, ReasonServingToInstanceDenied), nil
 	}
@@ -284,7 +287,7 @@ func decideOperator(input Input, decision Decision) Decision {
 	}
 	if !input.ControlReady {
 		if input.Bootstrap != BootstrapControlPending || input.Destination != ActorControl ||
-			(input.Action != ActionFirstControlCheck && input.Action != ActionControlInstall) {
+			(input.Action != ActionFirstControlCheck && input.Action != ActionControlInstall && input.Action != ActionControlAttest) {
 			return deny(decision, ReasonControlNotReady)
 		}
 		if !input.Authority.Human {
@@ -292,6 +295,9 @@ func decideOperator(input Input, decision Decision) Decision {
 		}
 		if reason := controlDestinationBinding(input); reason != "" {
 			return deny(decision, reason)
+		}
+		if input.Action == ActionControlAttest {
+			return allow(decision, ModeDirectControlProof, ReasonAllowControlProof)
 		}
 		return allow(decision, ModeDirectFirstControl, ReasonAllowFirstControl)
 	}
@@ -458,7 +464,7 @@ func validActor(actor Actor) bool {
 
 func validAction(action Action) bool {
 	switch action {
-	case ActionFirstControlCheck, ActionControlInstall, ActionServingBootstrap,
+	case ActionFirstControlCheck, ActionControlInstall, ActionControlAttest, ActionServingBootstrap,
 		ActionInstanceBootstrap, ActionDesiredStateUpdate, ActionSSH, ActionExec,
 		ActionVNC, ActionStatus, ActionReleasePull, ActionRecovery:
 		return true
@@ -478,7 +484,7 @@ func validBootstrap(state BootstrapState) bool {
 
 func validMode(mode Mode) bool {
 	switch mode {
-	case ModeDirectFirstControl, ModeViaControl, ModeOutboundHTTPSPull, ModeProviderConsole, ModeDenied:
+	case ModeDirectFirstControl, ModeDirectControlProof, ModeViaControl, ModeOutboundHTTPSPull, ModeProviderConsole, ModeDenied:
 		return true
 	default:
 		return false
@@ -566,7 +572,7 @@ func validDecision(decision Decision) bool {
 
 func validReason(reason Reason) bool {
 	switch reason {
-	case ReasonAllowFirstControl, ReasonAllowViaControl, ReasonAllowOutboundHTTPSPull,
+	case ReasonAllowFirstControl, ReasonAllowControlProof, ReasonAllowViaControl, ReasonAllowOutboundHTTPSPull,
 		ReasonAllowProviderRecovery, ReasonInvalidInput, ReasonActionNotAllowed,
 		ReasonControlNotReady, ReasonControlRevoked, ReasonHumanAuthorityRequired,
 		ReasonRecoveryAuthorityRequired, ReasonProviderConsoleRequired,
@@ -584,6 +590,8 @@ func allowedReasonForMode(mode Mode, reason Reason) bool {
 	switch mode {
 	case ModeDirectFirstControl:
 		return reason == ReasonAllowFirstControl
+	case ModeDirectControlProof:
+		return reason == ReasonAllowControlProof
 	case ModeViaControl:
 		return reason == ReasonAllowViaControl
 	case ModeOutboundHTTPSPull:
@@ -596,6 +604,6 @@ func allowedReasonForMode(mode Mode, reason Reason) bool {
 }
 
 func isAllowReason(reason Reason) bool {
-	return reason == ReasonAllowFirstControl || reason == ReasonAllowViaControl ||
+	return reason == ReasonAllowFirstControl || reason == ReasonAllowControlProof || reason == ReasonAllowViaControl ||
 		reason == ReasonAllowOutboundHTTPSPull || reason == ReasonAllowProviderRecovery
 }

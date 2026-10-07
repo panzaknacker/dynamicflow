@@ -14,13 +14,15 @@ func openApplication(ctx *commandContext) (*application.Application, error) {
 
 func commandSystem(ctx *commandContext, args []string) int {
 	if len(args) == 0 {
-		return usage(ctx, "usage: flow system <init|status>")
+		return usage(ctx, "usage: flow system <init|select|status>")
 	}
 	switch args[0] {
 	case "init":
 		return systemInit(ctx, args[1:])
 	case "status":
 		return systemStatus(ctx, args[1:])
+	case "select":
+		return systemSelect(ctx, args[1:])
 	default:
 		return usage(ctx, "unknown system command: "+args[0])
 	}
@@ -32,7 +34,7 @@ func systemInit(ctx *commandContext, args []string) int {
 	controlName := flags.String("control-name", "control-1", "first control node name")
 	plan := flags.Bool("plan", false, "preview local trust/bootstrap changes without applying them")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || strings.TrimSpace(*name) == "" {
-		return usage(ctx, "usage: flow system init --name NAME [--control-name NAME]")
+		return usage(ctx, "usage: flow system init --name NAME [--control-name NAME] [--plan]")
 	}
 	app, err := openApplication(ctx)
 	if err != nil {
@@ -43,12 +45,14 @@ func systemInit(ctx *commandContext, args []string) int {
 		if err != nil {
 			return emitApplicationError(ctx, err)
 		}
-		return ctx.out.success("system.init.plan", result, fmt.Sprintf("PLAN: %s\nNetwork connections: 0\nPrivate keys generated now: %t\nOOB hostkey required: true", strings.Join(result.Changes, "; "), result.GeneratesPrivateKeys))
+		return ctx.out.success("system.init.plan", result, fmt.Sprintf("PLAN: %s\nNetwork connections: 0\nPrivate keys generated on commit: %t\nOOB hostkey required: true", strings.Join(result.Changes, "; "), result.GeneratesPrivateKeys))
 	}
 	observer := application.ObserverFunc(func(event application.Event) {
 		ctx.out.phase(event.Phase, event.Status, event.Detail)
 	})
-	result, err := app.InitSystem(context.Background(), application.InitSystemRequest{
+	operation, stop := commandOperationContext()
+	defer stop()
+	result, err := app.InitSystem(operation, application.InitSystemRequest{
 		Meta: application.RequestMeta{Surface: application.SurfaceCLI}, Name: *name, ControlName: *controlName,
 	}, observer)
 	if err != nil {

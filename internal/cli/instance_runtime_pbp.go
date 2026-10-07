@@ -154,7 +154,7 @@ func reportPBPRuntimeLogsFrom(
 				continue
 			}
 			if sourceFile.size < checkpoint.Offset {
-				// the launcher never truncates or reuses a runtime log. refuse the
+				// The launcher never truncates or reuses a runtime log. Refuse the
 				// changed identity permanently instead of replaying old offsets.
 				checkpoint.Done = true
 				state.Files[sourceFile.name] = checkpoint

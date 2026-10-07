@@ -259,7 +259,7 @@ func TestInstanceRuntimeRecoversUnknownEnrollmentOutcome(t *testing.T) {
 	assertRuntimeOutputDoesNotContain(t, stdout+stderr, fixture.id, fixture.secret)
 	assertRuntimeTreeDoesNotContain(t, fixture.stateRoot, fixture.id, fixture.secret)
 
-	// a subsequent idempotent enroll uses the public config and pinned stable
+	// A subsequent idempotent enroll uses the public config and pinned stable
 	// identity; it must not open or consume credential input again.
 	second := newFakeRuntimeClient(fixture)
 	second.fetchResult = fixture.result
@@ -667,8 +667,8 @@ func TestInstanceRuntimeRevocationAckFailureIsPartialAndTimerRetrySafe(t *testin
 		t.Fatalf("partial revocation data=%#v err=%v", partial, err)
 	}
 
-	// a later timer tick refetches the same signed revocation, repeats the
-	// idempotent local fail-closed action, and completes the signed ack. it does
+	// A later timer tick refetches the same signed revocation, repeats the
+	// idempotent local fail-closed action, and completes the signed ack. It does
 	// not run an installer or require credential input.
 	client.statusErr = nil
 	status, stdout, stderr = invokeInstanceRuntime(t, []string{"reconcile", "--state-root", fixture.stateRoot}, deps)

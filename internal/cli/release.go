@@ -230,7 +230,7 @@ func releaseBuild(ctx *commandContext, args []string) int {
 		if err != nil || ctx.store.WriteFile("releases/signed-manifest.json", canonical) != nil {
 			return ctx.out.fail("config", "could not persist canonical signed manifest", "Repair local state permissions; the publishable stage was not changed.", exitConfig)
 		}
-		// staged.json is the final operator-side commit marker. verify and publish
+		// staged.json is the final operator-side commit marker. Verify and publish
 		// also require the canonical export above to match it exactly, so an
 		// interruption between these two atomic writes fails closed instead of
 		// exposing a partially committed candidate.
@@ -452,8 +452,8 @@ func rebuildArtifacts(ctx *commandContext, buildRoot, logPath string) error {
 		{"vpn", filepath.Join(ctx.sourceRoot, "vpn", "make-release.sh"), []string{versions["vpn"]}, filepath.Join(buildRoot, "vpn"), nil},
 		{"pbp-amd64", filepath.Join(ctx.sourceRoot, "pbp", "make-release.sh"), []string{"amd64", versions["pbp"]}, filepath.Join(buildRoot, "pbp"), nil},
 		{"pbp-arm64", filepath.Join(ctx.sourceRoot, "pbp", "make-release.sh"), []string{"arm64", versions["pbp"]}, filepath.Join(buildRoot, "pbp"), nil},
-		// the user's current working tree is the explicit source of truth. the
-		// decepticon builder records source_dirty=true in BUILD_INFO while still
+		// The user's current working tree is the explicit source of truth. The
+		// Decepticon builder records source_dirty=true in BUILD_INFO while still
 		// producing deterministic bytes from that exact tree.
 		{"decepticon", filepath.Join(ctx.sourceRoot, "decepticon", "make-release.sh"), []string{versions["decepticon"]}, filepath.Join(buildRoot, "decepticon"), map[string]string{"DECEPTICON_ALLOW_DIRTY": "1"}},
 		{"examstation", filepath.Join(ctx.sourceRoot, "examstation", "make-release.sh"), []string{versions["examstation"]}, filepath.Join(buildRoot, "examstation"), nil},
@@ -570,7 +570,7 @@ func runBuilderWithEnvironment(path string, arguments []string, dist, logPath st
 }
 
 // openReleaseBuildLog never follows the final path and validates both the
-// opened descriptor and its directory entry before a builder can write. this
+// opened descriptor and its directory entry before a builder can write. This
 // keeps an attacker-controlled symlink or hardlink in private operator state
 // from redirecting build output or truncating another file.
 func openReleaseBuildLog(path string, truncate bool) (*os.File, error) {
@@ -660,7 +660,7 @@ func discoverArtifacts(ctx *commandContext, buildRoot string, rebuilt bool, logP
 		}
 		return filepath.Join(existing, component, versions[component], target, file)
 	}
-	// examstation was historically outside the aggregate release. build its
+	// Examstation was historically outside the aggregate release. Build its
 	// exact current artifact on demand instead of silently selecting an older one.
 	examPath := pathFor("examstation", "any", "examstation.tar.gz")
 	if !rebuilt && !regularFile(examPath) {

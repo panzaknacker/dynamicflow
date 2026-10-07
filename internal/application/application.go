@@ -1,5 +1,5 @@
-// package application is the single policy and operation boundary shared by
-// dynamicflow's TUI, human CLI and JSON adapters.
+// Package application is the single policy and operation boundary shared by
+// Dynamicflow's TUI, human CLI and JSON adapters.
 package application
 
 import (
@@ -32,8 +32,9 @@ const (
 )
 
 type RequestMeta struct {
-	Surface       Surface `json:"surface"`
-	CorrelationID string  `json:"correlation_id,omitempty"`
+	Surface          Surface `json:"surface"`
+	CorrelationID    string  `json:"correlation_id,omitempty"`
+	ExpectedSystemID string  `json:"expected_system_id,omitempty"`
 }
 
 type Event struct {
@@ -142,8 +143,14 @@ type InitSystemPlan struct {
 }
 
 func (application *Application) PlanSystemInit(request InitSystemRequest) (InitSystemPlan, error) {
+	if application == nil || application.store == nil || application.systems == nil {
+		return InitSystemPlan{}, appError("application_unavailable", 3, "Dynamicflow application state is unavailable.", "Repair the private state directory.", nil)
+	}
 	if request.ControlName == "" {
 		request.ControlName = "control-1"
+	}
+	if !controlnodes.ValidName(request.ControlName) {
+		return InitSystemPlan{}, invalidInitialControlName()
 	}
 	plan := InitSystemPlan{
 		Plan: true, Name: request.Name, ControlName: request.ControlName, NetworkConnections: 0,
@@ -152,11 +159,55 @@ func (application *Application) PlanSystemInit(request InitSystemRequest) (InitS
 	existing, err := application.systems.GetByName(request.Name)
 	switch {
 	case err == nil:
+		if existing.Bootstrap.State != systemstate.BootstrapNotStarted && existing.Bootstrap.State != systemstate.BootstrapKeyPrepared {
+			return InitSystemPlan{}, appError("system_bootstrap_advanced", 6, "The existing system has advanced beyond local initialization.", "Use flow system select and flow control status to resume its recorded Control workflow.", nil)
+		}
 		plan.ExistingSystemID = existing.ID
 		if existing.Bootstrap.State == systemstate.BootstrapNotStarted {
 			plan.Changes = []string{"ensure five separated offline trust roots", "create unique first-Control bootstrap identity", "persist resumable bootstrap task"}
 			plan.GeneratesPrivateKeys = true
+			store, openErr := application.openSystemStore(existing.ID)
+			if openErr != nil && (existing.Trust.Generation > 0 || !errors.Is(openErr, os.ErrNotExist)) {
+				return InitSystemPlan{}, appError("system_state", 5, "The existing initialization directory is unsafe.", "Recover the original private system directory.", openErr)
+			}
+			if openErr == nil {
+				tasks, err := workflow.NewManager(store, workflow.WithClock(application.now)).List()
+				if err != nil {
+					return InitSystemPlan{}, appError("bootstrap_identity", 5, "The existing initialization journal is invalid.", "Recover its original task before resuming.", err)
+				}
+				if len(tasks) > 0 {
+					if err := application.readInitialIdentity(existing, store, request); err != nil {
+						return InitSystemPlan{}, err
+					}
+					plan.GeneratesPrivateKeys = false
+					plan.Changes = []string{"verify existing trust roots and bootstrap task", "commit the incomplete system initialization checkpoint"}
+				} else {
+					keyStarted, err := bootstrapKeyStarted(store)
+					if err != nil {
+						return InitSystemPlan{}, err
+					}
+					if keyStarted || existing.Trust.Generation > 0 {
+						if _, err := loadInitialTrust(existing, store); err != nil {
+							return InitSystemPlan{}, err
+						}
+						keys := sshkeys.NewManager(store)
+						if _, _, err := keys.Active(sshkeys.Bootstrap, request.ControlName); err == nil {
+							plan.GeneratesPrivateKeys = false
+							plan.Changes = []string{"verify existing trust roots and bootstrap identity", "persist resumable bootstrap task", "commit the incomplete system initialization checkpoint"}
+						} else if !errors.Is(err, sshkeys.ErrNotFound) {
+							return InitSystemPlan{}, appError("bootstrap_identity", 5, "The original first-Control bootstrap identity is unavailable.", "Recover its original private key and generation before resuming.", err)
+						}
+					}
+				}
+			}
 		} else {
+			store, err := application.openSystemStore(existing.ID)
+			if err != nil {
+				return InitSystemPlan{}, appError("system_state", 5, "The committed system directory is unavailable.", "Recover the original system state before resuming initialization.", err)
+			}
+			if err := application.readInitialIdentity(existing, store, request); err != nil {
+				return InitSystemPlan{}, err
+			}
 			plan.Changes = []string{"verify existing trust roots", "reuse the bound bootstrap identity and task"}
 		}
 	case errors.Is(err, systemstate.ErrNotFound):
@@ -196,11 +247,17 @@ func (application *Application) InitSystem(operation context.Context, request In
 	if application == nil || application.store == nil || application.systems == nil {
 		return InitSystemResult{}, appError("application_unavailable", 3, "Dynamicflow application state is unavailable.", "Repair the private state directory.", nil)
 	}
+	if operation == nil {
+		return InitSystemResult{}, appError("cancelled", 8, "System initialization was cancelled.", "Run the same command to resume.", nil)
+	}
 	if err := operation.Err(); err != nil {
 		return InitSystemResult{}, appError("cancelled", 8, "System initialization was cancelled.", "Run the same command to resume.", err)
 	}
 	if request.ControlName == "" {
 		request.ControlName = "control-1"
+	}
+	if !controlnodes.ValidName(request.ControlName) {
+		return InitSystemResult{}, invalidInitialControlName()
 	}
 	notify(observer, "system", "running", "creating or resuming private system state")
 	system, created, err := application.systems.CreateOrGet(request.Name)
@@ -217,40 +274,25 @@ func (application *Application) InitSystem(operation context.Context, request In
 		if err != nil {
 			return err
 		}
-		systemStore, err := application.ensureSystemStore(current.ID)
+		if current.Bootstrap.State != systemstate.BootstrapNotStarted && current.Bootstrap.State != systemstate.BootstrapKeyPrepared {
+			return appError("system_bootstrap_advanced", 6, "The existing system has advanced beyond local initialization.", "Use flow system select and flow control status to resume its recorded Control workflow.", nil)
+		}
+		var systemStore *localstate.Store
+		if current.Trust.Generation > 0 || current.Bootstrap.BootstrapKeyFingerprint != "" {
+			systemStore, err = application.openSystemStore(current.ID)
+		} else {
+			systemStore, err = application.ensureSystemStore(current.ID)
+		}
 		if err != nil {
 			return err
 		}
 		notify(observer, "trust", "running", "verifying five separated offline trust roots")
-		trust, err := operatortrust.Ensure(systemStore)
+		trust, key, task, err := application.prepareInitialIdentity(operation, current, systemStore, request, observer)
 		if err != nil {
-			return fmt.Errorf("ensure system trust: %w", err)
-		}
-		if err := operatortrust.Validate(trust); err != nil {
 			return err
 		}
-		notify(observer, "bootstrap_key", "running", "creating or reopening the unique first-control identity")
-		keys := sshkeys.NewManager(systemStore, sshkeys.WithSSHKeygen(application.sshKeygen), sshkeys.WithClock(application.now))
-		key, keyErr := keys.Create(operation, sshkeys.Bootstrap, request.ControlName)
-		if errors.Is(keyErr, sshkeys.ErrAlreadyExists) {
-			key, keyErr = keys.Get(sshkeys.Bootstrap, request.ControlName)
-		}
-		if keyErr != nil {
-			return fmt.Errorf("ensure control bootstrap identity: %w", keyErr)
-		}
 		expiresAt := key.CreatedAt.Add(defaultBootstrapLifetime)
-		workflows := workflow.NewManager(systemStore, workflow.WithClock(application.now))
-		task, err := workflows.CreateControlBootstrap(current.ID, request.ControlName, workflow.KeyReference{
-			Scope: key.Scope, Name: key.Name, Generation: key.Generation, Fingerprint: key.Fingerprint,
-		})
-		if err != nil {
-			return fmt.Errorf("ensure control bootstrap workflow: %w", err)
-		}
-		expectedTrust := systemstate.TrustMetadata{
-			Generation: 1, SystemRootKeyID: trust.SystemRoot, ReleaseKeyID: trust.Release,
-			DesiredStateKeyID: trust.DesiredState, ServingAdminKeyID: trust.ServingAdmin,
-			ControlPolicyKeyID: trust.ControlPolicy,
-		}
+		expectedTrust := initialTrustMetadata(trust, current.Trust.Generation)
 		expectedBootstrap := systemstate.BootstrapMetadata{
 			State:                   systemstate.BootstrapKeyPrepared,
 			BootstrapKeyFingerprint: key.Fingerprint,
@@ -290,6 +332,10 @@ func (application *Application) InitSystem(operation context.Context, request In
 		return nil
 	})
 	if err != nil {
+		var failure *Error
+		if errors.As(err, &failure) {
+			return InitSystemResult{}, failure
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return InitSystemResult{}, appError("cancelled", 8, "System initialization stopped at a resumable checkpoint.", "Run the same command to resume; do not generate another bootstrap key.", err)
 		}
@@ -383,8 +429,8 @@ type BootstrapGuide struct {
 }
 
 func (application *Application) Dashboard(operation context.Context) (DashboardSnapshot, error) {
-	if err := operation.Err(); err != nil {
-		return DashboardSnapshot{}, appError("cancelled", 8, "Dashboard refresh was cancelled.", "Retry the refresh.", err)
+	if operation == nil || operation.Err() != nil {
+		return DashboardSnapshot{}, appError("cancelled", 8, "Dashboard refresh was cancelled.", "Retry the refresh.", nil)
 	}
 	registry, err := application.systems.Snapshot()
 	if err != nil {
@@ -395,9 +441,19 @@ func (application *Application) Dashboard(operation context.Context) (DashboardS
 		Systems: registry.Systems, Controls: []controlnodes.Record{}, Tasks: []workflow.Task{}, ObservedAt: application.now().UTC(),
 	}
 	if registry.ActiveSystemID != "" {
+		// Use the selection and metadata from this exact registry snapshot. A
+		// second Active() read can observe a concurrent switch and mix one
+		// system's tasks/keys with another system's Control and expiry.
+		var active systemstate.System
+		for _, candidate := range registry.Systems {
+			if candidate.ID == registry.ActiveSystemID {
+				active = candidate
+				break
+			}
+		}
 		store, err := application.openSystemStore(registry.ActiveSystemID)
-		if errors.Is(err, os.ErrNotExist) {
-			snapshot.Capabilities = append(capabilities(registry.Systems, registry.ActiveSystemID), controlInstallCapability(snapshot))
+		if errors.Is(err, os.ErrNotExist) && active.Trust.Generation == 0 && active.Bootstrap.State == systemstate.BootstrapNotStarted {
+			snapshot.Capabilities = dashboardCapabilities(snapshot)
 			return snapshot, nil
 		}
 		if err != nil {
@@ -406,10 +462,6 @@ func (application *Application) Dashboard(operation context.Context) (DashboardS
 		snapshot.Tasks, err = workflow.NewManager(store, workflow.WithClock(application.now)).List()
 		if err != nil {
 			return DashboardSnapshot{}, appError("workflow_state", 3, "Workflow state is invalid.", "Recover the affected task before continuing.", err)
-		}
-		active, activeErr := application.systems.Active()
-		if activeErr != nil {
-			return DashboardSnapshot{}, appError("system_state", 3, "The active system binding is invalid.", "Recover the private registry.", activeErr)
 		}
 		keys := sshkeys.NewManager(store, sshkeys.WithSSHKeygen(application.sshKeygen), sshkeys.WithClock(application.now), sshkeys.WithControlScope())
 		controls, managerErr := controlnodes.NewManager(application.store, keys, controlnodes.WithClock(application.now))
@@ -427,23 +479,109 @@ func (application *Application) Dashboard(operation context.Context) (DashboardS
 			return DashboardSnapshot{}, appError("topology_state", 3, "The system topology is invalid.", "Repair its pinned routes before continuing.", topologyErr)
 		}
 		for _, task := range snapshot.Tasks {
+			if task.SystemID != active.ID {
+				return DashboardSnapshot{}, appError("workflow_state", 5, "A workflow belongs to a different system.", "Recover the task's original system binding.", nil)
+			}
 			if task.Kind != workflow.ControlBootstrap || task.Phase == workflow.PhaseReady || task.Phase == workflow.PhaseRevoked {
 				continue
 			}
 			key, keyErr := keys.Get(task.Key.Scope, task.Key.Name)
-			if keyErr != nil || key.Generation != task.Key.Generation || key.Fingerprint != task.Key.Fingerprint || active.Bootstrap.ExpiresAt == nil {
+			if keyErr != nil || key.Name != task.Resource.Name || key.Generation != task.Key.Generation || key.Fingerprint != task.Key.Fingerprint {
 				return DashboardSnapshot{}, appError("bootstrap_identity", 5, "The persisted Control bootstrap identity does not match its task.", "Do not generate a replacement; recover the owner-local key generation and task binding.", keyErr)
+			}
+			if active.Bootstrap.State == systemstate.BootstrapNotStarted && task.Phase == workflow.PhaseAwaitingCloudVM {
+				// The journal commits before the registry's final initialization
+				// checkpoint. Resume is valid, but this snapshot cannot yet offer
+				// a committed bootstrap identity or cloud handoff.
+				continue
+			}
+			if active.Bootstrap.BootstrapKeyFingerprint != key.Fingerprint || active.Bootstrap.ExpiresAt == nil {
+				return DashboardSnapshot{}, appError("bootstrap_identity", 5, "The bootstrap identity differs from the system registry.", "Recover the original system binding before continuing.", nil)
 			}
 			snapshot.Bootstrap = &BootstrapGuide{
 				SystemID: active.ID, ControlName: task.Resource.Name, TaskID: task.ID, Phase: task.Phase,
 				PublicKey: key.PublicKey, PublicKeyFingerprint: key.Fingerprint, ExpiresAt: *active.Bootstrap.ExpiresAt,
-				Expired: !application.now().UTC().Before(*active.Bootstrap.ExpiresAt), HostTrustRequired: active.Bootstrap.HostKeyFingerprint == "",
+				Expired: !snapshot.ObservedAt.Before(*active.Bootstrap.ExpiresAt), HostTrustRequired: active.Bootstrap.HostKeyFingerprint == "",
 			}
 			break
 		}
 	}
-	snapshot.Capabilities = append(capabilities(registry.Systems, registry.ActiveSystemID), controlInstallCapability(snapshot))
+	snapshot.Capabilities = dashboardCapabilities(snapshot)
 	return snapshot, nil
+}
+
+func dashboardCapabilities(snapshot DashboardSnapshot) []Capability {
+	return append(capabilities(snapshot.Systems, snapshot.ActiveSystemID), controlInstallCapability(snapshot),
+		controlRemoteCapability(snapshot, "control.apply"), controlRemoteCapability(snapshot, "control.attest"))
+}
+
+func controlRemoteCapability(snapshot DashboardSnapshot, action string) Capability {
+	capability := Capability{Action: action, Reason: "control_install_required"}
+	if action != "control.apply" && action != "control.attest" {
+		return capability
+	}
+	provisioning := false
+	for _, system := range snapshot.Systems {
+		if system.ID == snapshot.ActiveSystemID {
+			provisioning = system.Bootstrap.State == systemstate.BootstrapProvisioning
+		}
+	}
+	if !provisioning || snapshot.Topology == nil || snapshot.Topology.Control == nil || snapshot.Topology.ControlReady {
+		return capability
+	}
+	var control *controlnodes.Record
+	for index := range snapshot.Controls {
+		candidate := &snapshot.Controls[index]
+		if candidate.SystemID != snapshot.ActiveSystemID || candidate.Lifecycle == controlnodes.LifecycleRevoked {
+			continue
+		}
+		if control != nil {
+			capability.Reason = "control_ambiguous"
+			return capability
+		}
+		control = candidate
+	}
+	if control == nil || control.Lifecycle != controlnodes.LifecycleInstalling || control.Access.Phase != controlnodes.AccessStaged {
+		return capability
+	}
+	expected := topology.Control{Name: control.Name, Host: control.Host, SSHPort: control.Port, SSHUser: control.SSHUser,
+		Trust: topology.TrustPinned, HostKeyFingerprint: control.HostFingerprint}
+	if *snapshot.Topology.Control != expected {
+		capability.Reason = "topology_inconsistent"
+		return capability
+	}
+	var task *workflow.Task
+	for index := range snapshot.Tasks {
+		candidate := &snapshot.Tasks[index]
+		if candidate.SystemID != snapshot.ActiveSystemID || candidate.Kind != workflow.ControlBootstrap || candidate.Resource.Name != control.Name {
+			continue
+		}
+		if task != nil {
+			capability.Reason = "workflow_ambiguous"
+			return capability
+		}
+		task = candidate
+	}
+	if task == nil {
+		capability.Reason = "workflow_required"
+		return capability
+	}
+	phase := task.Phase
+	if phase == workflow.PhaseFailedSafe {
+		code := "control_install"
+		if action == "control.attest" {
+			code = "control_attestation"
+		}
+		if task.Failure == nil || task.Failure.Code != code {
+			capability.Reason = "failed_safe"
+			return capability
+		}
+		phase = task.ResumePhase
+	}
+	if action == "control.apply" && phase == workflow.PhaseInstalling || action == "control.attest" && phase == workflow.PhaseAttesting {
+		capability.Allowed, capability.Reason = true, ""
+	}
+	return capability
 }
 
 func controlInstallCapability(snapshot DashboardSnapshot) Capability {

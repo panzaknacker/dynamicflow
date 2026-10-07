@@ -1,4 +1,4 @@
-// package profiles loads and resolves dynamicflow's declarative profile graph.
+// Package profiles loads and resolves Dynamicflow's declarative profile graph.
 package profiles
 
 import (
@@ -155,7 +155,7 @@ func (r *Registry) List(includeInternal bool) []Profile {
 }
 
 // Resolve returns a dependency-first topological ordering for all requested
-// profiles. it rejects conflicts anywhere in the complete dependency closure.
+// profiles. It rejects conflicts anywhere in the complete dependency closure.
 func (r *Registry) Resolve(names ...string) ([]Profile, error) {
 	if len(names) == 0 {
 		return nil, fmt.Errorf("%w: no profile requested", ErrNotFound)

@@ -8,7 +8,7 @@ import (
 	"dynamicflow/internal/application"
 )
 
-const controlApplyUsage = "usage: flow control apply NAME [--plan]"
+const controlApplyUsage = "usage: flow control apply NAME [--plan] [--expect-system SYS_ID]"
 
 type controlApplyPlanOutput struct {
 	Plan               bool     `json:"plan"`
@@ -56,6 +56,7 @@ type controlApplyOutput struct {
 
 func controlApply(ctx *commandContext, args []string) int {
 	flags := newCommandFlagSet(ctx, "control apply")
+	meta := registerControlSystemExpectation(flags)
 	planOnly := flags.Bool("plan", false, "preview the one-session pinned remote installation")
 	if err := parseInterspersed(flags, args); err != nil || flags.NArg() != 1 {
 		return usage(ctx, controlApplyUsage)
@@ -65,7 +66,7 @@ func controlApply(ctx *commandContext, args []string) int {
 		return ctx.out.fail("system_state", err.Error(), "Repair FLOW_HOME ownership, mode or registry state.", exitConfig)
 	}
 	request := application.InstallPreparedControlRequest{
-		Meta: application.RequestMeta{Surface: application.SurfaceCLI}, Name: flags.Arg(0),
+		Meta: *meta, Name: flags.Arg(0),
 	}
 	if *planOnly {
 		plan, err := app.PlanPreparedControlInstall(context.Background(), request)
@@ -102,7 +103,9 @@ func controlApply(ctx *commandContext, args []string) int {
 	observer := application.ObserverFunc(func(event application.Event) {
 		ctx.out.phase(event.Phase, event.Status, event.Detail)
 	})
-	result, err := app.InstallPreparedControl(context.Background(), request, observer)
+	operation, stop := commandOperationContext()
+	defer stop()
+	result, err := app.InstallPreparedControl(operation, request, observer)
 	if err != nil {
 		return emitApplicationError(ctx, err)
 	}

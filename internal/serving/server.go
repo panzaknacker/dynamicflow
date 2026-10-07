@@ -1,5 +1,5 @@
-// package serving exposes dynamicflow's deliberately narrow HTTPS distribution
-// and enrollment API. it has no generic command or SSH initiation endpoint.
+// Package serving exposes Dynamicflow's deliberately narrow HTTPS distribution
+// and enrollment API. It has no generic command or SSH initiation endpoint.
 package serving
 
 import (
@@ -139,7 +139,7 @@ func New(config Config) (*Server, error) {
 	return server, nil
 }
 
-// Handler always requires a direct TLS connection. deployments terminating TLS
+// Handler always requires a direct TLS connection. Deployments terminating TLS
 // in a reverse proxy must re-encrypt to serving instead of trusting spoofable
 // forwarding headers.
 func (server *Server) Handler() http.Handler { return server.handler }
@@ -258,7 +258,7 @@ func (server *Server) handleAdminReleaseImport(writer http.ResponseWriter, reque
 		writeAPIError(writer, http.StatusUnauthorized, "control_authentication_failed", "control request authentication failed")
 		return
 	}
-	// the ordinary server timeout protects small API calls. a release may be
+	// The ordinary server timeout protects small API calls. A release may be
 	// several GiB, so extend only this already authenticated request.
 	_ = http.NewResponseController(writer).SetReadDeadline(time.Now().Add(2 * time.Hour))
 	importsRoot := filepath.Join(server.releaseRoot, ".imports")
@@ -449,7 +449,7 @@ type enrollResponse struct {
 	Desired       enrollment.SignedDesiredState `json:"desired"`
 }
 
-// AdminEnrollmentCreateRequest contains no enrollment secret. the serving
+// AdminEnrollmentCreateRequest contains no enrollment secret. The serving
 // node creates the one-time secret only after authenticating this exact body
 // and validating the independently signed desired state.
 type AdminEnrollmentCreateRequest struct {
@@ -490,7 +490,7 @@ func (server *Server) handleEnroll(writer http.ResponseWriter, request *http.Req
 	})
 	if err != nil {
 		// Instance and profile remain attacker-controlled until Consume has
-		// authenticated the one-time credential and its exact bindings. never
+		// authenticated the one-time credential and its exact bindings. Never
 		// copy those raw fields into the audit log: a secret is itself a valid
 		// identifier-shaped token.
 		server.recordAudit(request, "enroll", "rejected", "", "")
@@ -581,7 +581,7 @@ func (server *Server) handleAdminEnrollments(writer http.ResponseWriter, request
 			}
 			// Desired state is committed first: a crash can leave a harmless,
 			// resumable signed document but never a live credential without
-			// desired state. the exact retry is idempotent.
+			// desired state. The exact retry is idempotent.
 			if putErr := server.desiredStates.Put(input.Desired, current.Manifest.SetID, server.clock().UTC(), server.maxClockSkew); putErr != nil {
 				return putErr
 			}
@@ -751,8 +751,8 @@ func (server *Server) handleAdminInstance(writer http.ResponseWriter, request *h
 			record, findErr := server.enrollments.FindInstance(instance)
 			switch {
 			case findErr == nil && record.Profile != desired.State.Profile:
-				// runtime configuration and client state bind the enrollment
-				// profile. until they can migrate that binding atomically, do
+				// Runtime configuration and client state bind the enrollment
+				// profile. Until they can migrate that binding atomically, do
 				// not commit a desired document that would strand the target.
 				return errProfileTransitionUnsupported
 			case errors.Is(findErr, enrollment.ErrNotFound):

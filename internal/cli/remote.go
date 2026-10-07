@@ -460,7 +460,7 @@ func newOperatorHTTPClient(base *url.URL, caPEM []byte, pin string) (*http.Clien
 }
 
 func pemDecodeCertificate(data []byte) ([]byte, []byte) {
-	// kept local to avoid accepting additional PEM blocks through CertPool.
+	// Kept local to avoid accepting additional PEM blocks through CertPool.
 	block, rest := pem.Decode(data)
 	if block == nil || block.Type != "CERTIFICATE" {
 		return nil, rest

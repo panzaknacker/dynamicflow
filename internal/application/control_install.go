@@ -23,7 +23,7 @@ import (
 
 const initialControlPolicyLifetime = 30 * 24 * time.Hour
 
-// PrepareControlInstallRequest selects the already pinned first Control. the
+// PrepareControlInstallRequest selects the already pinned first Control. The
 // preparation operation is local-only: it creates the long-lived owner-local
 // management identity and a signed, route-free installation envelope.
 type PrepareControlInstallRequest struct {
@@ -31,7 +31,7 @@ type PrepareControlInstallRequest struct {
 	Name string      `json:"name"`
 }
 
-// PrepareControlInstallPlan is deliberately public-only. a missing management
+// PrepareControlInstallPlan is deliberately public-only. A missing management
 // identity is reported as a future local key-generation change; the plan never
 // creates that identity or an installation envelope.
 type PrepareControlInstallPlan struct {
@@ -50,7 +50,7 @@ type PrepareControlInstallPlan struct {
 }
 
 // PrepareControlInstallResult contains only public management-key metadata and
-// content digests. private paths and envelope bytes stay behind the operation
+// content digests. Private paths and envelope bytes stay behind the operation
 // boundary used later by the fixed remote installer.
 type PrepareControlInstallResult struct {
 	Prepared            bool                      `json:"prepared"`
@@ -81,8 +81,14 @@ func (application *Application) PlanControlInstall(operation context.Context, re
 	if err := operation.Err(); err != nil {
 		return PrepareControlInstallPlan{}, appError("cancelled", 8, "Control installation planning was cancelled.", "Retry the local plan.", err)
 	}
+	if err := application.checkSystemExpectation(request.Meta); err != nil {
+		return PrepareControlInstallPlan{}, err
+	}
 	active, store, bindingContext, _, record, err := application.controlInstallContext(request.Name)
 	if err != nil {
+		return PrepareControlInstallPlan{}, err
+	}
+	if err := validateSystemExpectation(request.Meta, active.ID); err != nil {
 		return PrepareControlInstallPlan{}, err
 	}
 	if err := validateControlInstallCheckpoint(record, bindingContext.task); err != nil {
@@ -138,7 +144,7 @@ func (application *Application) PlanControlInstall(operation context.Context, re
 }
 
 // PrepareControlInstall commits the public signed input needed by the later
-// fixed remote installer. it deliberately performs zero network operations.
+// fixed remote installer. It deliberately performs zero network operations.
 func (application *Application) PrepareControlInstall(operation context.Context, request PrepareControlInstallRequest, observer Observer) (PrepareControlInstallResult, error) {
 	if application == nil || application.store == nil || application.systems == nil {
 		return PrepareControlInstallResult{}, appError("application_unavailable", 3, "Dynamicflow application state is unavailable.", "Repair the private state directory.", nil)
@@ -149,6 +155,9 @@ func (application *Application) PrepareControlInstall(operation context.Context,
 	active, err := application.systems.Active()
 	if err != nil {
 		return PrepareControlInstallResult{}, appError("system_required", 3, "No active Dynamicflow system is available.", "Create, bind and verify the first Control VM.", err)
+	}
+	if err := validateSystemExpectation(request.Meta, active.ID); err != nil {
+		return PrepareControlInstallResult{}, err
 	}
 
 	var result PrepareControlInstallResult
@@ -270,15 +279,9 @@ func (application *Application) controlInstallContextWithResume(name string, all
 	if err != nil {
 		return systemstate.System{}, nil, controlBindingContext{}, nil, controlnodes.Record{}, err
 	}
-	manager, err := controlnodes.NewManager(application.store, bindingContext.keys, controlnodes.WithClock(application.now))
+	record, manager, err := application.loadControlRecord(bindingContext)
 	if err != nil {
-		return systemstate.System{}, nil, controlBindingContext{}, nil, controlnodes.Record{},
-			appError("control_state", 3, "Control state could not be validated.", "Repair the private Control registry.", err)
-	}
-	record, err := manager.Get(active.ID, bindingContext.task.Resource.Name)
-	if err != nil {
-		return systemstate.System{}, nil, controlBindingContext{}, nil, controlnodes.Record{},
-			appError("control_binding", 3, "The first Control VM is not safely bound.", "Bind and verify its pinned endpoint first.", err)
+		return systemstate.System{}, nil, controlBindingContext{}, nil, controlnodes.Record{}, err
 	}
 	return active, store, bindingContext, manager, record, nil
 }

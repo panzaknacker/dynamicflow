@@ -1,8 +1,8 @@
 package lab
 
-// qualification attestations are narrow declarations about tests that cannot
+// Qualification attestations are narrow declarations about tests that cannot
 // be recreated safely without receiving an enrollment secret or publishing
-// deliberately invalid release material. reports never label them automated.
+// deliberately invalid release material. Reports never label them automated.
 const (
 	GateFreshEnrollmentOutboundHTTPS = "fresh-enrollment-outbound-https"
 	GateEnrollmentReplayRejected     = "enrollment-replay-rejected"
@@ -65,7 +65,7 @@ type QualificationStep struct {
 	Actions     []Action `json:"actions,omitempty"`
 }
 
-// QualificationMatrix returns the smallest fixed sequence used by runner.
+// QualificationMatrix returns the smallest fixed sequence used by Runner.
 func QualificationMatrix() []QualificationStep {
 	steps := []QualificationStep{
 		{Name: "inventory-disposable-and-hostkey", Role: "all", Kind: "inventory-gate"},

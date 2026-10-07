@@ -1,5 +1,5 @@
-// package localstate provides a small, security-focused store for operator-local
-// dynamicflow state. all managed directories and files are private to their
+// Package localstate provides a small, security-focused store for operator-local
+// Dynamicflow state. All managed directories and files are private to their
 // owner, symbolic links are rejected, and replacements are atomic.
 package localstate
 
@@ -31,10 +31,11 @@ var (
 
 // Store owns one private directory tree.
 type Store struct {
-	root string
+	root     string
+	rootInfo os.FileInfo
 }
 
-// DefaultRoot returns the XDG state directory used by dynamicflow. FLOW_HOME
+// DefaultRoot returns the XDG state directory used by Dynamicflow. FLOW_HOME
 // can be used by the CLI to select an explicit state directory.
 func DefaultRoot() (string, error) {
 	if configured := os.Getenv("FLOW_HOME"); configured != "" {
@@ -62,14 +63,18 @@ func Open(root string) (*Store, error) {
 	if err := ensureAbsolutePrivateRoot(abs); err != nil {
 		return nil, fmt.Errorf("create state root: %w", err)
 	}
-	if err := validatePath(abs, true); err != nil {
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("inspect state root: %w", err)
+	}
+	if err := validateInfo(info, true); err != nil {
 		return nil, fmt.Errorf("validate state root: %w", err)
 	}
-	return &Store{root: abs}, nil
+	return &Store{root: abs, rootInfo: info}, nil
 }
 
 // ensureAbsolutePrivateRoot traverses from an already-open filesystem root.
-// no path component may be a symlink, and creation is descriptor-relative so
+// No path component may be a symlink, and creation is descriptor-relative so
 // an attacker cannot redirect MkdirAll through a swapped ancestor.
 func ensureAbsolutePrivateRoot(path string) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) == string(filepath.Separator) {
@@ -161,13 +166,10 @@ func (s *Store) EnsureDir(relative string) (string, error) {
 	return current, nil
 }
 
-// ReadFile reads a private regular file without following a final symlink.
+// ReadFile reads a private regular file through the original private state
+// root. Every managed parent is checked without following symbolic links.
 func (s *Store) ReadFile(relative string) ([]byte, error) {
-	path, err := s.Path(relative)
-	if err != nil {
-		return nil, err
-	}
-	f, err := openNoFollow(path, syscall.O_RDONLY, 0)
+	f, err := s.openReadFile(relative)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +308,7 @@ func (s *Store) WithLock(relative string, fn func() error) error {
 	return s.withLock(relative, false, fn)
 }
 
-// WithTryLock runs fn while holding an owner-only advisory lock. it fails with
+// WithTryLock runs fn while holding an owner-only advisory lock. It fails with
 // ErrLockBusy instead of waiting when another process already holds the lock.
 func (s *Store) WithTryLock(relative string, fn func() error) error {
 	return s.withLock(relative, true, fn)

@@ -1,5 +1,5 @@
-// package operatortrust manages per-system, role-separated offline signing
-// roots. it exposes identifiers only; private bytes and paths never leave it.
+// Package operatortrust manages per-system, role-separated offline signing
+// roots. It exposes identifiers only; private bytes and paths never leave it.
 package operatortrust
 
 import (
@@ -43,8 +43,27 @@ func Ensure(store *localstate.Store) (Bundle, error) {
 	if store == nil {
 		return Bundle{}, errors.New("operator trust store is required")
 	}
+	// Existing trust is a read-only operation, including when its obsolete
+	// initialization lock file is absent. Recheck after locking only for the
+	// concurrent initial-creation case below.
+	var committed Bundle
+	if err := store.ReadJSON("keys/signing/trust.json", &committed); err == nil {
+		return Load(store)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Bundle{}, fmt.Errorf("read committed operator trust: %w", err)
+	}
 	var result Bundle
 	err := store.WithLock("keys/signing/.trust.lock", func() error {
+		var committed Bundle
+		if err := store.ReadJSON("keys/signing/trust.json", &committed); err == nil {
+			// Once committed, trust is immutable through Ensure. In particular,
+			// losing both halves of a pair must not silently create a new root.
+			var loadErr error
+			result, loadErr = Load(store)
+			return loadErr
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read committed operator trust: %w", err)
+		}
 		directory, err := store.EnsureDir("keys/signing")
 		if err != nil {
 			return err
@@ -63,16 +82,7 @@ func Ensure(store *localstate.Store) (Bundle, error) {
 					return fmt.Errorf("generate %s trust root: %w", item.name, err)
 				}
 			}
-			private, err := signing.LoadPrivateFile(privatePath)
-			if err != nil {
-				return fmt.Errorf("load %s private key: %w", item.name, err)
-			}
-			public, err := signing.LoadPublicFile(publicPath)
-			derived := private.Public().(ed25519.PublicKey)
-			if err != nil || !derived.Equal(public) {
-				return fmt.Errorf("%s trust pair does not match", item.name)
-			}
-			ids[item.name], err = signing.KeyID(public)
+			ids[item.name], err = loadRoleKeyID(store, item)
 			if err != nil {
 				return err
 			}
@@ -114,7 +124,7 @@ func Validate(bundle Bundle) error {
 }
 
 // SignControlPolicy signs only the fixed control-policy domain with the
-// per-system ControlPolicy root. private key bytes remain inside this package
+// per-system ControlPolicy root. Private key bytes remain inside this package
 // and are cleared before return.
 func SignControlPolicy(store *localstate.Store, policy controlpolicy.Policy) (controlpolicy.SignedPolicy, error) {
 	if store == nil {
@@ -141,7 +151,7 @@ func SignControlPolicy(store *localstate.Store, policy controlpolicy.Policy) (co
 }
 
 // ControlPolicyPublic returns a detached public PEM and key ID suitable for
-// the pinned first-control installation envelope. it never creates trust state
+// the pinned first-Control installation envelope. It never creates trust state
 // or exposes the private key path.
 func ControlPolicyPublic(store *localstate.Store) ([]byte, string, error) {
 	if store == nil {

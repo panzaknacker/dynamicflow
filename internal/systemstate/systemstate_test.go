@@ -44,7 +44,7 @@ func TestCreateOrGetMultipleSystemsIsIdempotentPrivateAndDeterministic(t *testin
 		t.Fatalf("alpha ID = %q", alpha.ID)
 	}
 
-	// the entropy reader is now exhausted. an idempotent lookup must not read it
+	// The entropy reader is now exhausted. An idempotent lookup must not read it
 	// or advance registry/system revisions.
 	again, created, err := store.CreateOrGet("alpha")
 	if err != nil || created || again != alpha {

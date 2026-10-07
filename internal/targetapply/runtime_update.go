@@ -31,7 +31,7 @@ func (r *runner) ensureRuntimeArtifact(ctx context.Context, artifact applyplan.A
 	if os.Geteuid() != 0 {
 		return "", fmt.Errorf("%w: runtime update requires root", ErrArtifactVerification)
 	}
-	// persist the newly created recovery-directory entry before any installed
+	// Persist the newly created recovery-directory entry before any installed
 	// binary can point at bytes whose recovery copy could disappear on reboot.
 	parent, err := openTrustedAbsoluteDirectory(filepath.Dir(r.runtimeRecoveryDir), true)
 	if err != nil {
@@ -274,9 +274,9 @@ func activateRuntimeFromDirectories(recovery, destination *os.File, artifact app
 }
 
 // stageInstalledRuntimeRecovery preserves the previously running executable
-// before the first atomic replacement. the copy is content-addressed and
+// before the first atomic replacement. The copy is content-addressed and
 // root-only, but deliberately not treated as a signed release artifact and is
-// never selected automatically. it exists solely for explicit console
+// never selected automatically. It exists solely for explicit console
 // recovery when the first signed replacement cannot run.
 func stageInstalledRuntimeRecovery(recovery, destination *os.File, expectedUID uint32) (string, error) {
 	source, err := openNamedRuntimeFile(destination, "flow")

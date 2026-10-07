@@ -1,5 +1,5 @@
-// package instances manages operator-local instance metadata, pinned host keys,
-// and hardened OpenSSH arguments. it never performs a network connection.
+// Package instances manages operator-local instance metadata, pinned host keys,
+// and hardened OpenSSH arguments. It never performs a network connection.
 package instances
 
 import (
@@ -82,7 +82,7 @@ func NewManager(store *localstate.Store, keys *sshkeys.Manager, options ...Optio
 	return manager
 }
 
-// Put creates or updates an instance. an existing host key may only be changed
+// Put creates or updates an instance. An existing host key may only be changed
 // through RotateHostKey, making trust-boundary changes explicit.
 func (m *Manager) Put(input Record) (Record, error) {
 	record, err := m.normalizeInput(input)
@@ -229,7 +229,7 @@ func (m *Manager) List() ([]Record, error) {
 }
 
 // SSHArgs returns hardened OpenSSH arguments containing only the active
-// identity. offering an older private generation is never the safe default:
+// identity. Offering an older private generation is never the safe default:
 // callers must prove that the instance is in its signed rotation-overlap
 // window and then opt in through SSHArgsWithPrevious.
 func (m *Manager) SSHArgs(name string) ([]string, error) {
@@ -237,7 +237,7 @@ func (m *Manager) SSHArgs(name string) ([]string, error) {
 }
 
 // SSHArgsWithPrevious additionally offers the cryptographically linked
-// immediately preceding identity. this is only for a locally verified
+// immediately preceding identity. This is only for a locally verified
 // desired-state overlap window; it must stop as soon as old-key removal is
 // published.
 func (m *Manager) SSHArgsWithPrevious(name string) ([]string, error) {

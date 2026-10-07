@@ -159,7 +159,7 @@ func TestInitCommandAndRestartShowSamePublicKey(t *testing.T) {
 	ui := newModel(context.Background(), app, snapshot, []string{"NO_COLOR=1"})
 	view := ui.View().Content
 	if snapshot.Bootstrap == nil || snapshot.Bootstrap.PublicKey != initialized.result.Cloud.PublicKey ||
-		!strings.Contains(view, initialized.result.Cloud.PublicKey) || !strings.Contains(view, "TRUST GATE") {
+		!strings.Contains(strings.ReplaceAll(view, "\n", ""), initialized.result.Cloud.PublicKey) || !strings.Contains(view, "TRUST GATE") {
 		t.Fatalf("restart lost public guide: bootstrap=%+v view=%q", snapshot.Bootstrap, view)
 	}
 	if strings.Contains(view, "PRIVATE KEY") || strings.Contains(view, "id_ed25519") {
@@ -240,8 +240,8 @@ func TestControlBindWizardPlansThenCommitsWithoutNetwork(t *testing.T) {
 		t.Fatalf("binding plan is not visibly complete: %q", view)
 	}
 
-	// printable pasted text that spells a control key must never authorize a
-	// trust commit. only an actual enter key event may do that.
+	// Printable pasted text that spells a control key must never authorize a
+	// trust commit. Only an actual Enter key event may do that.
 	ui, planCommand = updateTUI(t, ui, tuiText("enter"))
 	if ui.screen != screenControlBindConfirm || planCommand != nil {
 		t.Fatal("pasted text authorized the binding")
@@ -294,7 +294,7 @@ func TestControlCheckConfirmationUsesOnePinnedFixedCommandAndRestartsCleanly(t *
 		t.Fatal(err)
 	}
 
-	// constructing a fresh model represents a TUI process restart. the durable
+	// Constructing a fresh model represents a TUI process restart. The durable
 	// Application state must put it back at the host-key verified gate.
 	ui := newModel(context.Background(), fixture.app, snapshot, []string{"NO_COLOR=1"})
 	if snapshot.Bootstrap == nil || string(snapshot.Bootstrap.Phase) != "hostkey_verified" ||
@@ -436,7 +436,7 @@ func TestControlInstallPreparationPlansCommitsAndResumesWithoutNetwork(t *testin
 		}
 	}
 
-	// printable paste must never authorize the local identity/policy commit.
+	// Printable paste must never authorize the local identity/policy commit.
 	ui, planCommand = updateTUI(t, ui, tuiText("enter"))
 	if ui.screen != screenControlInstallConfirm || planCommand != nil {
 		t.Fatal("pasted text authorized local Control installation preparation")
@@ -499,7 +499,7 @@ func TestControlInstallPreparationPlansCommitsAndResumesWithoutNetwork(t *testin
 		}
 	}
 
-	// a printable paste on the receipt cannot navigate. a real esc refreshes
+	// A printable paste on the receipt cannot navigate. A real Esc refreshes
 	// durable state, and a fresh TUI process exposes the resumable checkpoint.
 	ui, planCommand = updateTUI(t, ui, tuiText("esc"))
 	if ui.screen != screenControlInstallPrepared || planCommand != nil {

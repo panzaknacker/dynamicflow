@@ -1,4 +1,4 @@
-// package enrollment implements dynamicflow's short-lived, one-time VM
+// Package enrollment implements Dynamicflow's short-lived, one-time VM
 // enrollment credentials and instance-bound identity records.
 package enrollment
 
@@ -106,7 +106,7 @@ type diskState struct {
 // Option configures a Store.
 type Option func(*Store)
 
-// WithClock supplies a testable clock. production callers should omit it.
+// WithClock supplies a testable clock. Production callers should omit it.
 func WithClock(now func() time.Time) Option {
 	return func(store *Store) {
 		if now != nil {
@@ -116,7 +116,7 @@ func WithClock(now func() time.Time) Option {
 }
 
 // Store persists credential digests, consumption state and request nonces in
-// a single atomically replaced 0600 JSON file. a separate 0600 flock serializes
+// a single atomically replaced 0600 JSON file. A separate 0600 flock serializes
 // writers across Store objects and processes.
 type Store struct {
 	path string
@@ -143,7 +143,7 @@ func NewStore(path string, options ...Option) (*Store, error) {
 	return store, nil
 }
 
-// Create returns a 256-bit base64url secret. only a domain-separated digest is
+// Create returns a 256-bit base64url secret. Only a domain-separated digest is
 // persisted; callers must deliberately deliver the returned secret once.
 func (store *Store) Create(instance, profile string, ttl time.Duration) (Credential, error) {
 	if !validIdentifier(instance) || !validIdentifier(profile) || ttl <= 0 || ttl > 24*time.Hour {
@@ -179,7 +179,7 @@ func (store *Store) Create(instance, profile string, ttl time.Duration) (Credent
 			issued := store.now().UTC()
 			now := issued.Unix()
 			expires := issued.Add(ttl).Unix()
-			// a non-monotonic injected clock must not create a non-expiring code.
+			// A non-monotonic injected clock must not create a non-expiring code.
 			if expires <= now {
 				return false, ErrInvalidEnrollment
 			}
@@ -217,7 +217,7 @@ func (store *Store) HasActiveInstance(instance string) (bool, error) {
 }
 
 // Consume atomically burns a credential and records the instance identity.
-// exactly one concurrent caller can succeed.
+// Exactly one concurrent caller can succeed.
 func (store *Store) Consume(request ConsumeRequest) (Record, error) {
 	if !validIdentifier(request.Instance) || !validIdentifier(request.Profile) || request.ID == "" {
 		return Record{}, ErrInvalidEnrollment
@@ -295,7 +295,7 @@ func (store *Store) List() ([]Record, error) {
 }
 
 // Revoke burns an enrollment credential without deleting its audit evidence.
-// it is idempotent and also prevents a consumed instance identity from being
+// It is idempotent and also prevents a consumed instance identity from being
 // selected by FindInstance.
 func (store *Store) Revoke(id string) (Record, error) {
 	if id == "" || len(id) > 128 {
@@ -357,7 +357,7 @@ func (store *Store) FindInstance(instance string) (Record, error) {
 
 // SetInstanceProfile updates the binding of an already consumed, unrevoked
 // instance identity after a separately signed desired-state profile change.
-// pending credentials remain immutable and profile-bound.
+// Pending credentials remain immutable and profile-bound.
 func (store *Store) SetInstanceProfile(instance, profile string) (Record, error) {
 	if !validIdentifier(instance) || !validIdentifier(profile) {
 		return Record{}, ErrInvalidEnrollment
@@ -428,7 +428,7 @@ func emptyState() diskState {
 	}
 }
 
-// withLockedState serializes every read as well as every mutation. serializing
+// withLockedState serializes every read as well as every mutation. Serializing
 // reads avoids observing a rename half-way through a concurrent operation on
 // platforms/filesystems with weaker metadata visibility.
 func (store *Store) withLockedState(createIfMissing bool, mutate func(*diskState) (bool, error)) error {
@@ -447,7 +447,7 @@ func (store *Store) withLockedState(createIfMissing bool, mutate func(*diskState
 	if !exists {
 		state = emptyState()
 		if !createIfMissing {
-			// the callback decides whether an absent store is semantically an
+			// The callback decides whether an absent store is semantically an
 			// empty store (for example, a lookup returns ErrNotFound).
 		}
 	}
@@ -657,7 +657,7 @@ func validateDiskState(state diskState) error {
 		if len(parts) == 3 && parts[0] == "instance" && validIdentifier(parts[1]) {
 			validNamespace = true
 		}
-		// accept legacy instance-name\0nonce entries written before the
+		// Accept legacy instance-name\0nonce entries written before the
 		// explicit namespace prefix was introduced; they expire naturally.
 		if len(parts) == 2 && validIdentifier(parts[0]) {
 			validNamespace = true

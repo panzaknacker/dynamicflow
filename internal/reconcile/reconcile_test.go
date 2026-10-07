@@ -212,7 +212,7 @@ func TestEngineRejectsImpossibleForgedJournalState(t *testing.T) {
 	for index, name := range plan.Phases {
 		state := PhaseState{Name: name, Status: Pending}
 		if index == 0 {
-			// a completed phase without an attempt/timestamps could otherwise
+			// A completed phase without an attempt/timestamps could otherwise
 			// suppress the fixed SSH phase on resume.
 			state.Status = Complete
 		}

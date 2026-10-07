@@ -87,9 +87,9 @@ func instanceStatusHTTPS(ctx *commandContext, args []string) int {
 			}
 			sshPinned = true
 		case errors.Is(pinErr, instances.ErrNotFound):
-			// a serving node verifies the target request, but a compromised
+			// A serving node verifies the target request, but a compromised
 			// serving node can still fabricate its stored status response.
-			// initial SSH trust therefore requires an independent provider-
+			// Initial SSH trust therefore requires an independent provider-
 			// console key and the explicit hostkey pin command.
 		default:
 			return ctx.out.fail("ssh_host_key", pinErr.Error(), "Repair local pinned-host metadata before using SSH.", exitConfig)

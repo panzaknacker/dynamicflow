@@ -1,5 +1,5 @@
-// package reconcile executes a fixed declarative profile plan with durable,
-// resumable phases. it has no generic command/job facility.
+// Package reconcile executes a fixed declarative profile plan with durable,
+// resumable phases. It has no generic command/job facility.
 package reconcile
 
 import (
@@ -43,7 +43,7 @@ type Plan struct {
 	Generation uint64 `json:"generation"`
 	// PlanID binds the durable journal to the complete, independently
 	// verified target plan (including authorized keys and artifact digests).
-	// generic reconcile users may omit it; target installers must set it.
+	// Generic reconcile users may omit it; target installers must set it.
 	PlanID string   `json:"plan_id,omitempty"`
 	Phases []string `json:"phases"`
 }
@@ -89,7 +89,7 @@ func (failure *PhaseError) Error() string { return failure.Code + ": " + failure
 
 // Runner is implemented by a fixed allowlist of component/profile executors.
 // Rollback must either restore the previous state or establish a documented
-// safe fail-closed state. it returns nil only after restoring the prior state,
+// safe fail-closed state. It returns nil only after restoring the prior state,
 // ErrFailClosedEstablished after independently confirming a blocked state, and
 // any other error when neither result could be confirmed.
 type Runner interface {
@@ -142,8 +142,8 @@ func (engine *Engine) Run(ctx context.Context, plan Plan) (Journal, error) {
 	for index := range journal.Phases {
 		phase := &journal.Phases[index]
 		if phase.Status == Complete {
-			// completion is a durable checkpoint, not a permanent assertion that
-			// the live host still satisfies the policy. re-verify every completed
+			// Completion is a durable checkpoint, not a permanent assertion that
+			// the live host still satisfies the policy. Re-verify every completed
 			// phase on each reconciliation so configuration drift (notably a
 			// disabled VPN lockdown mode) is detected and forced fail-closed.
 			phase.Status = Verifying
@@ -209,7 +209,7 @@ func (engine *Engine) fail(path string, journal Journal, index int, cause error,
 		case errors.Is(err, ErrFailClosedEstablished):
 			phase.Status = FailClosed
 		case err != nil:
-			// do not claim fail-closed when the runner could not prove it. this
+			// Do not claim fail-closed when the runner could not prove it. This
 			// state also blocks superseding the journal with a different plan.
 			phase.Status = Failed
 			phase.ErrorCode = "rollback_failed"

@@ -19,7 +19,7 @@ import (
 const (
 	LogSchema         = 1
 	MaxLogBatchEvents = 256
-	// with the finite nine-component allowlist, 1024 maximally sized events
+	// With the finite nine-component allowlist, 1024 maximally sized events
 	// per component keep the authenticated aggregate operator response below
 	// the client's 2 MiB bound while retaining substantially more than one
 	// upload batch.
@@ -33,7 +33,7 @@ var (
 	ErrLogCapacity         = fmt.Errorf("%w: component capacity reached", ErrInvalidLog)
 )
 
-// LogEvent deliberately has no free-form message field. instances may upload
+// LogEvent deliberately has no free-form message field. Instances may upload
 // only finite event and error-code tokens; raw stderr and secrets remain on the
 // target in its protected, locally rotated component log.
 type LogEvent struct {
@@ -81,7 +81,7 @@ func ValidateLogBatch(batch LogBatch) error {
 }
 
 // ValidateLogSnapshot applies the same finite-token contract to data returned
-// to an operator. callers must validate snapshots even though the transport is
+// to an operator. Callers must validate snapshots even though the transport is
 // authenticated: a compromised serving node must not be able to inject
 // terminal control characters through a human-readable log view.
 func ValidateLogSnapshot(snapshot LogSnapshot) error {
@@ -141,7 +141,7 @@ func validLogCode(code string) bool {
 }
 
 // IsRevocationLogBatch recognizes the only finite log event accepted after a
-// desired-state revocation. the generation-bound status acknowledgement is
+// desired-state revocation. The generation-bound status acknowledgement is
 // authoritative; this event only makes the local SSH fail-closed transition
 // visible in the component log.
 func IsRevocationLogBatch(batch LogBatch) bool {
@@ -193,8 +193,8 @@ func (store *LogStore) Put(batch LogBatch) error {
 	} else if componentCount >= MaxLogComponents {
 		return ErrLogCapacity
 	}
-	// once retention has discarded an event, accepting that sequence again
-	// would make collision detection depend on upload timing. reject batches
+	// Once retention has discarded an event, accepting that sequence again
+	// would make collision detection depend on upload timing. Reject batches
 	// older than the retained watermark instead of resurrecting them.
 	if len(snapshot.Events) == MaxRetainedEvents && batch.Events[0].Sequence < snapshot.Events[0].Sequence {
 		return ErrLogSequenceConflict

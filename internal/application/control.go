@@ -127,6 +127,9 @@ func (application *Application) PlanControlBind(operation context.Context, reque
 	if err != nil {
 		return BindControlPlan{}, appError("system_required", 3, "No active Dynamicflow system is available.", "Create or select a system before binding Control.", err)
 	}
+	if err := validateSystemExpectation(request.Meta, active.ID); err != nil {
+		return BindControlPlan{}, err
+	}
 	store, err := application.openSystemStore(active.ID)
 	if err != nil {
 		return BindControlPlan{}, appError("system_state", 3, "The active system state is unavailable.", "Repair its private owner-local directory.", err)
@@ -175,8 +178,8 @@ func (application *Application) PlanControlBind(operation context.Context, reque
 	return plan, nil
 }
 
-// BindControl commits only local, independently verified trust metadata. it
-// deliberately performs zero network operations. a crash between checkpoints
+// BindControl commits only local, independently verified trust metadata. It
+// deliberately performs zero network operations. A crash between checkpoints
 // is repaired by replaying the exact same immutable request.
 func (application *Application) BindControl(operation context.Context, request BindControlRequest, observer Observer) (BindControlResult, error) {
 	if application == nil || application.store == nil || application.systems == nil {
@@ -188,6 +191,9 @@ func (application *Application) BindControl(operation context.Context, request B
 	active, err := application.systems.Active()
 	if err != nil {
 		return BindControlResult{}, appError("system_required", 3, "No active Dynamicflow system is available.", "Create or select a system before binding Control.", err)
+	}
+	if err := validateSystemExpectation(request.Meta, active.ID); err != nil {
+		return BindControlResult{}, err
 	}
 	var result BindControlResult
 	operationLock := filepath.Join("systems", active.ID, "operations", "control-bootstrap.lock")
@@ -304,7 +310,7 @@ const (
 )
 
 // PlanControlCheck proves that all local identities and pins needed by the
-// single direct first-Control exception are intact. it creates no managed SSH
+// single direct first-Control exception are intact. It creates no managed SSH
 // files, starts no process and changes no workflow checkpoint.
 func (application *Application) PlanControlCheck(operation context.Context, request CheckControlRequest) (CheckControlPlan, error) {
 	if err := operation.Err(); err != nil {
@@ -313,6 +319,9 @@ func (application *Application) PlanControlCheck(operation context.Context, requ
 	active, err := application.systems.Active()
 	if err != nil {
 		return CheckControlPlan{}, appError("system_required", 3, "No active Dynamicflow system is available.", "Create and bind the first Control VM.", err)
+	}
+	if err := validateSystemExpectation(request.Meta, active.ID); err != nil {
+		return CheckControlPlan{}, err
 	}
 	store, err := application.openSystemStore(active.ID)
 	if err != nil {
@@ -380,11 +389,14 @@ func (application *Application) PlanControlCheck(operation context.Context, requ
 }
 
 // CheckControl performs the only operator-local direct network connection
-// permitted by the Control-first architecture. it is one pinned SSH attempt,
+// permitted by the Control-first architecture. It is one pinned SSH attempt,
 // one fixed /bin/true command, no shell, no retry and no fallback.
 func (application *Application) CheckControl(operation context.Context, request CheckControlRequest, observer Observer) (CheckControlResult, error) {
 	if application == nil || application.store == nil || application.systems == nil {
 		return CheckControlResult{}, appError("application_unavailable", 3, "Dynamicflow application state is unavailable.", "Repair the private state directory.", nil)
+	}
+	if operation == nil {
+		return CheckControlResult{}, appError("cancelled", 8, "Control connectivity check was cancelled.", "Run the same explicit check to resume.", nil)
 	}
 	if err := operation.Err(); err != nil {
 		return CheckControlResult{}, appError("cancelled", 8, "Control connectivity check was cancelled.", "Run the same explicit check to resume.", err)
@@ -393,9 +405,15 @@ func (application *Application) CheckControl(operation context.Context, request 
 	if err != nil {
 		return CheckControlResult{}, appError("system_required", 3, "No active Dynamicflow system is available.", "Create and bind the first Control VM.", err)
 	}
+	if err := validateSystemExpectation(request.Meta, active.ID); err != nil {
+		return CheckControlResult{}, err
+	}
 	var result CheckControlResult
 	operationLock := filepath.Join("systems", active.ID, "operations", "control-bootstrap.lock")
-	err = application.store.WithLock(operationLock, func() error {
+	err = application.store.WithTryLock(operationLock, func() error {
+		if err := operation.Err(); err != nil {
+			return err
+		}
 		current, err := application.systems.Active()
 		if err != nil || current.ID != active.ID {
 			return fmt.Errorf("active system changed during Control check: %w", err)
@@ -484,6 +502,9 @@ func (application *Application) CheckControl(operation context.Context, request 
 					"stdout_bytes": transportResult.StdoutBytes, "stderr_bytes": transportResult.StderrBytes,
 				},
 			})
+			if errors.Is(checkErr, context.Canceled) || errors.Is(checkErr, context.DeadlineExceeded) {
+				return appError("cancelled", 8, "The Control connectivity check stopped at a fail-safe checkpoint.", "Run the same explicit check to resume.", checkErr)
+			}
 			return appError("control_connectivity", 7, "The pinned first-Control connectivity check failed safely.", next, checkErr)
 		}
 		notify(observer, "control_connectivity", "running", "committing connectivity evidence before advancing the task")
@@ -519,8 +540,8 @@ func (application *Application) CheckControl(operation context.Context, request 
 		switch {
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			return CheckControlResult{}, appError("cancelled", 8, "The Control connectivity check stopped at a fail-safe checkpoint.", "Run the same explicit check to resume.", err)
-		case errors.Is(err, controlnodes.ErrRevisionConflict), errors.Is(err, workflow.ErrConflict):
-			return CheckControlResult{}, appError("control_conflict", 6, "Control connectivity state changed concurrently.", "Refresh status and retry the explicit check.", err)
+		case errors.Is(err, localstate.ErrLockBusy), errors.Is(err, controlnodes.ErrRevisionConflict), errors.Is(err, workflow.ErrConflict):
+			return CheckControlResult{}, appError("control_conflict", 6, "Another Control operation is active or its checkpoint changed.", "Refresh status and retry the explicit check.", err)
 		default:
 			return CheckControlResult{}, appError("control_check", 5, "The first-Control connectivity gate is inconsistent or invalid.", "Inspect Control status, pins and the persistent task before retrying.", err)
 		}
@@ -649,7 +670,7 @@ func normalizeControlRequest(request BindControlRequest, expectedName string) (n
 	if len(fields) < 2 {
 		return normalizedControlRequest{}, appError("control_hostkey", 5, "The supplied Control host key is invalid.", "Use the single-line Ed25519 host public key.", nil)
 	}
-	// drop any untrusted comment before persistence or display. the key type and
+	// Drop any untrusted comment before persistence or display. The key type and
 	// base64 body are the complete cryptographic host identity.
 	canonicalKey := strings.Join(fields[:2], " ")
 	return normalizedControlRequest{
@@ -714,6 +735,13 @@ func (application *Application) loadControlRecord(bindingContext controlBindingC
 	if err != nil {
 		return controlnodes.Record{}, nil, appError("control_binding", 3, "The first Control VM is not safely bound.", "Bind its endpoint and independently verified Ed25519 host key first.", err)
 	}
+	key := bindingContext.task.Key
+	if record.SystemID != bindingContext.system.ID || record.Name != bindingContext.task.Resource.Name ||
+		bindingContext.system.Bootstrap.ControlNodeID != record.Name ||
+		bindingContext.system.Bootstrap.HostKeyFingerprint != record.HostFingerprint ||
+		record.BootstrapKey != (controlnodes.BootstrapKeyRef{Scope: key.Scope, Name: key.Name, Generation: key.Generation, Fingerprint: key.Fingerprint}) {
+		return controlnodes.Record{}, nil, appError("control_binding", 5, "System, task and Control identities do not describe the same pinned bootstrap binding.", "Recover the exact recorded Control name, host pin and bootstrap generation before connecting.", nil)
+	}
 	return record, manager, nil
 }
 
@@ -728,7 +756,11 @@ func authorizeFirstControlNetwork(systemID string, record controlnodes.Record, a
 		Target:    netpolicy.TargetBinding{ID: record.Name, PinnedFingerprint: record.HostFingerprint},
 		Authority: netpolicy.Authority{Human: true},
 	})
-	if err != nil || !decision.Allowed() || decision.Mode() != netpolicy.ModeDirectFirstControl {
+	expectedMode := netpolicy.ModeDirectFirstControl
+	if action == netpolicy.ActionControlAttest {
+		expectedMode = netpolicy.ModeDirectControlProof
+	}
+	if err != nil || !decision.Allowed() || decision.Mode() != expectedMode {
 		return netpolicy.Decision{}, appError("network_policy", 6, "The Control-first network policy denied the direct bootstrap path.", "Inspect the selected Control identity, host pin and bootstrap checkpoint; no fallback is permitted.", err)
 	}
 	return decision, nil

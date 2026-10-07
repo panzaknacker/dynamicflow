@@ -519,7 +519,7 @@ func buildBootstrap(publicURL string, manifest release.SignedManifest, certPath,
 }
 
 // buildBootstrapFromData keeps planning and reconciliation on the exact same
-// deterministic bootstrap representation. its inputs contain public trust
+// deterministic bootstrap representation. Its inputs contain public trust
 // material plus the serving transport certificate; no signing or TLS private
 // key is accepted.
 func buildBootstrapFromData(publicURL string, manifest release.SignedManifest, tlsPin string, cert, releasePublic, desiredPublic []byte) ([]byte, error) {
@@ -558,10 +558,10 @@ func buildBootstrapFromData(publicURL string, manifest release.SignedManifest, t
 		" --tls-ca /etc/dynamicflow/trust/serving-ca.pem --tls-pin " + shellQuote(tlsPin) +
 		" --release-public-key /etc/dynamicflow/trust/release.public.pem --desired-public-key /etc/dynamicflow/trust/desired-state.public.pem --admin-user \"$admin_user\""
 	script.WriteString("run_enrollment() {\n  exec " + enrollmentCommand + "\n}\n")
-	// a curl-to-shell quickstart inherits curl's exhausted pipe as stdin even
-	// when it still has a controlling console. explicitly reopen that console
+	// A curl-to-shell quickstart inherits curl's exhausted pipe as stdin even
+	// when it still has a controlling console. Explicitly reopen that console
 	// so all four enrollment fields, especially the secret, remain hidden and
-	// interactive. truly headless bootstraps retain the bounded stdin path.
+	// interactive. Truly headless bootstraps retain the bounded stdin path.
 	script.WriteString("if ( : </dev/tty ) 2>/dev/null; then\n  run_enrollment </dev/tty\nfi\n")
 	script.WriteString("run_enrollment\n")
 	return []byte(script.String()), nil
@@ -744,8 +744,8 @@ func requireRootExecutable(path string) error {
 }
 
 func secureServingOwnership(stateRoot, releaseRoot string, uid, gid int) error {
-	// never recursively repair the service-writable private tree as root.
-	// only the fixed directories are opened with O_NOFOLLOW and changed via
+	// Never recursively repair the service-writable private tree as root.
+	// Only the fixed directories are opened with O_NOFOLLOW and changed via
 	// their descriptors; runtime-created files are validated by serving when
 	// it opens them.
 	for _, directory := range []string{

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// the planner is a trust-boundary component, not an installer. keep network,
+// The planner is a trust-boundary component, not an installer. Keep network,
 // process execution and filesystem mutation out of this package so callers
 // cannot accidentally turn planning into an implicit privileged action.
 func TestPlannerHasNoNetworkExecutionOrFilesystemMutationImports(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 const (
 	DefaultSSHDConfigPath = "/etc/ssh/sshd_config"
 	DefaultSSHDDropInPath = "/etc/ssh/sshd_config.d/60-dynamicflow-control.conf"
+	rollbackTimeout       = time.Minute
 )
 
 var (
@@ -26,7 +27,7 @@ var (
 )
 
 // InstallRequest supplies the independently authenticated binding expected by
-// the bootstrap transport. system and control identifiers are never inferred
+// the bootstrap transport. System and Control identifiers are never inferred
 // from the untrusted envelope itself.
 type InstallRequest struct {
 	ExpectedSystemID    string `json:"expected_system_id"`
@@ -35,7 +36,7 @@ type InstallRequest struct {
 }
 
 // PlanPhase is intentionally free of key material, command output and remote
-// addresses. it is safe for normal CLI/TUI and JSON output.
+// addresses. It is safe for normal CLI/TUI and JSON output.
 type PlanPhase struct {
 	Name       string `json:"name"`
 	WillChange bool   `json:"will_change"`
@@ -58,7 +59,7 @@ type InstallPlan struct {
 }
 
 // InstallResult reports only authenticated public metadata and whether a
-// failed activation was restored. raw stderr/stdout never crosses this API.
+// failed activation was restored. Raw stderr/stdout never crosses this API.
 type InstallResult struct {
 	SystemID       string `json:"system_id"`
 	ControlName    string `json:"control_name"`
@@ -115,7 +116,7 @@ type installPlatform interface {
 	CleanupStaging() error
 }
 
-// Installer reconciles the fixed linux control runtime. NewInstaller is the
+// Installer reconciles the fixed Linux Control runtime. NewInstaller is the
 // production constructor; tests use the same orchestration through an injected
 // platform so no unit test writes /etc or creates an account.
 type Installer struct {
@@ -123,7 +124,7 @@ type Installer struct {
 	now      func() time.Time
 }
 
-// NewInstaller constructs the production linux installer using the exact
+// NewInstaller constructs the production Linux installer using the exact
 // running /proc/self/exe as the runtime source.
 func NewInstaller() *Installer {
 	return NewInstallerWithDependencies(nil, ProcessExecutableSource{})
@@ -131,13 +132,13 @@ func NewInstaller() *Installer {
 
 // NewInstallerWithDependencies keeps the command and executable-source
 // boundaries injectable without allowing callers to choose destination paths.
-// the runner only receives fixed executable paths and argv arrays selected
+// The runner only receives fixed executable paths and argv arrays selected
 // inside this package; no shell command strings are built.
 func NewInstallerWithDependencies(runner CommandRunner, source ExecutableSource) *Installer {
 	return &Installer{platform: newLinuxPlatform(productionLinuxConfig(), runner, source), now: time.Now}
 }
 
-// Plan authenticates a bounded canonical envelope and inspects the host. it is
+// Plan authenticates a bounded canonical envelope and inspects the host. It is
 // read-only: it does not create a lock, directory, user or temporary file.
 func (installer *Installer) Plan(ctx context.Context, reader io.Reader, request InstallRequest) (InstallPlan, error) {
 	prepared, err := installer.prepare(ctx, reader, request)
@@ -153,8 +154,8 @@ func (installer *Installer) Plan(ctx context.Context, reader io.Reader, request 
 
 // Install verifies before the first mutation, serializes concurrent attempts,
 // repeats preflight under the lock, then activates and reloads transactionally.
-// a reload failure restores the previous bundle/drop-in and reloads that old
-// configuration. failure to prove the restoration is surfaced as a mandatory
+// A reload failure restores the previous bundle/drop-in and reloads that old
+// configuration. Failure to prove the restoration is surfaced as a mandatory
 // provider-console recovery condition.
 func (installer *Installer) Install(ctx context.Context, reader io.Reader, request InstallRequest) (InstallResult, error) {
 	if installer == nil || installer.platform == nil || installer.now == nil || ctx == nil || reader == nil {
@@ -188,8 +189,8 @@ func (installer *Installer) Install(ctx context.Context, reader io.Reader, reque
 		return result, safeInstallError(ErrInstallFailed, err)
 	}
 	if !state.InstallExecutable && !state.ActivateBundle && !state.InstallDropIn {
-		// a previous process may have crashed after its final rename but before
-		// reloading sshd. revalidating and reloading an exact configuration is
+		// A previous process may have crashed after its final rename but before
+		// reloading sshd. Revalidating and reloading an exact configuration is
 		// idempotent and closes that otherwise invisible resume gap.
 		if err := installer.platform.ValidateActiveSSHD(ctx); err != nil {
 			return result, safeInstallError(ErrSSHDValidation, err)
@@ -252,7 +253,7 @@ func (installer *Installer) Install(ctx context.Context, reader io.Reader, reque
 		}
 	}
 	if err := transaction.Commit(); err != nil {
-		// activation and reload already succeeded. do not roll a valid policy
+		// Activation and reload already succeeded. Do not roll a valid policy
 		// back solely because removal of a root-owned recovery copy failed.
 		finished = true
 		return result, safeInstallError(ErrInstallFailed, err)
@@ -266,13 +267,18 @@ func (installer *Installer) Install(ctx context.Context, reader io.Reader, reque
 }
 
 func (installer *Installer) restore(ctx context.Context, transaction stagedMutation) error {
+	// Once activation changed the host, cancellation must not leave sshd using
+	// a different policy from the restored files. Keep recovery independent of
+	// the caller's cancellation while bounding its validation and reload work.
+	recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+	defer cancel()
 	if err := transaction.Rollback(); err != nil {
 		return err
 	}
-	if err := installer.platform.ValidateActiveSSHD(ctx); err != nil {
+	if err := installer.platform.ValidateActiveSSHD(recovery); err != nil {
 		return err
 	}
-	if err := installer.platform.ReloadSSHD(ctx); err != nil {
+	if err := installer.platform.ReloadSSHD(recovery); err != nil {
 		return err
 	}
 	return transaction.Commit()
@@ -283,7 +289,13 @@ func (installer *Installer) prepare(ctx context.Context, reader io.Reader, reque
 		request.ExpectedSystemID == "" || request.ExpectedControlName == "" {
 		return preparedInstall{}, ErrInvalidEnvelope
 	}
+	if err := ctx.Err(); err != nil {
+		return preparedInstall{}, err
+	}
 	data, err := io.ReadAll(io.LimitReader(reader, MaxEnvelopeBytes+1))
+	if contextErr := ctx.Err(); contextErr != nil {
+		return preparedInstall{}, contextErr
+	}
 	if err != nil || len(data) == 0 || len(data) > MaxEnvelopeBytes {
 		return preparedInstall{}, ErrInvalidEnvelope
 	}
@@ -345,7 +357,7 @@ type classifiedInstallError struct {
 func (problem classifiedInstallError) Error() string { return problem.public.Error() }
 
 func (problem classifiedInstallError) Is(target error) bool {
-	return target == problem.public || target == problem.cause
+	return target == problem.public || errors.Is(problem.cause, target)
 }
 
 func safeInstallError(public, cause error) error {

@@ -173,7 +173,7 @@ func TestServingReferenceV1MigratesFromMatchingRootCreatedConfigWithoutMutation(
 		migrated.ControlPublicKeySource != config.ControlPublicKey || migrated.ServiceUser != defaultServingServiceUser {
 		t.Fatalf("legacy reference was not migrated from config: %#v", migrated)
 	}
-	// loading status/config remains read-only. the next successful explicit
+	// Loading status/config remains read-only. The next successful explicit
 	// `flow start serving` persists schema v2 atomically.
 	raw, err := operatorStore.ReadFile("serving/local.json")
 	if err != nil || !strings.Contains(string(raw), `"schema":1`) || strings.Contains(string(raw), "key_source") {

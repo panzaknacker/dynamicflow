@@ -12,6 +12,7 @@ import (
 
 	"dynamicflow/internal/controlinstalltransport"
 	"dynamicflow/internal/controlnodes"
+	"dynamicflow/internal/localstate"
 	"dynamicflow/internal/netpolicy"
 	"dynamicflow/internal/sshtransport"
 	"dynamicflow/internal/systemstate"
@@ -81,8 +82,14 @@ func (application *Application) PlanPreparedControlInstall(operation context.Con
 	if err := operation.Err(); err != nil {
 		return InstallPreparedControlPlan{}, appError("cancelled", 8, "Control installation plan was cancelled.", "Retry the plan.", err)
 	}
+	if err := application.checkSystemExpectation(request.Meta); err != nil {
+		return InstallPreparedControlPlan{}, err
+	}
 	active, store, bindingContext, _, record, err := application.controlInstallContextWithResume(request.Name, true)
 	if err != nil {
+		return InstallPreparedControlPlan{}, err
+	}
+	if err := validateSystemExpectation(request.Meta, active.ID); err != nil {
 		return InstallPreparedControlPlan{}, err
 	}
 	if err := validatePreparedControlApplyCheckpoint(active, record, bindingContext.task); err != nil {
@@ -144,11 +151,14 @@ func (application *Application) PlanPreparedControlInstall(operation context.Con
 }
 
 // InstallPreparedControl performs one explicit, pinned and audited bootstrap
-// session. it never retries or selects another endpoint. a failed attempt is
+// session. It never retries or selects another endpoint. A failed attempt is
 // persisted fail-safe and requires another explicit invocation.
 func (application *Application) InstallPreparedControl(operation context.Context, request InstallPreparedControlRequest, observer Observer) (InstallPreparedControlResult, error) {
 	if application == nil || application.store == nil || application.systems == nil {
 		return InstallPreparedControlResult{}, appError("application_unavailable", 3, "Dynamicflow application state is unavailable.", "Repair the private state directory.", nil)
+	}
+	if operation == nil {
+		return InstallPreparedControlResult{}, appError("cancelled", 8, "Control installation was cancelled.", "Run the same explicit operation to resume.", nil)
 	}
 	if err := operation.Err(); err != nil {
 		return InstallPreparedControlResult{}, appError("cancelled", 8, "Control installation was cancelled.", "Run the same explicit operation to resume.", err)
@@ -157,9 +167,15 @@ func (application *Application) InstallPreparedControl(operation context.Context
 	if err != nil {
 		return InstallPreparedControlResult{}, appError("system_required", 3, "No active Dynamicflow system is available.", "Prepare the first Control installation.", err)
 	}
+	if err := validateSystemExpectation(request.Meta, active.ID); err != nil {
+		return InstallPreparedControlResult{}, err
+	}
 	var result InstallPreparedControlResult
 	operationLock := filepath.Join("systems", active.ID, "operations", "control-bootstrap.lock")
-	err = application.store.WithLock(operationLock, func() error {
+	err = application.store.WithTryLock(operationLock, func() error {
+		if err := operation.Err(); err != nil {
+			return err
+		}
 		current, store, bindingContext, _, record, err := application.controlInstallContextWithResume(request.Name, true)
 		if err != nil {
 			return err
@@ -265,6 +281,9 @@ func (application *Application) InstallPreparedControl(operation context.Context
 					"stdout_bytes": transportResult.StdoutBytes, "stderr_bytes": transportResult.StderrBytes,
 				},
 			})
+			if errors.Is(installErr, context.Canceled) || errors.Is(installErr, context.DeadlineExceeded) {
+				return appError("cancelled", 8, "Control installation stopped at a fail-safe checkpoint.", "Run the same explicit operation to resume.", installErr)
+			}
 			return appError("control_install", 7, "The pinned first-Control installation failed safely.", next, installErr)
 		}
 		evidence = controlInstallEvidence{
@@ -311,8 +330,8 @@ func (application *Application) InstallPreparedControl(operation context.Context
 		switch {
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			return InstallPreparedControlResult{}, appError("cancelled", 8, "Control installation stopped at a fail-safe checkpoint.", "Run the same explicit operation to resume.", err)
-		case errors.Is(err, workflow.ErrConflict), errors.Is(err, controlnodes.ErrRevisionConflict):
-			return InstallPreparedControlResult{}, appError("control_conflict", 6, "Control installation state changed concurrently.", "Refresh status and retry.", err)
+		case errors.Is(err, localstate.ErrLockBusy), errors.Is(err, workflow.ErrConflict), errors.Is(err, controlnodes.ErrRevisionConflict):
+			return InstallPreparedControlResult{}, appError("control_conflict", 6, "Another Control operation is active or its checkpoint changed.", "Refresh status and retry.", err)
 		default:
 			return InstallPreparedControlResult{}, appError("control_install", 5, "The prepared Control installation checkpoint is inconsistent or invalid.", "Inspect the private task, envelope and install evidence before retrying.", err)
 		}

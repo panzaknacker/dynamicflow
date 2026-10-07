@@ -12,7 +12,7 @@ type emitter struct {
 	stdout io.Writer
 	stderr io.Writer
 	// command is the normalized requested command used for failure envelopes.
-	// success and failData callers pass their more specific command directly.
+	// Success and failData callers pass their more specific command directly.
 	command string
 }
 

@@ -1,6 +1,6 @@
-// package controlinstalltransport owns the single-session process boundary
+// Package controlinstalltransport owns the single-session process boundary
 // that installs the first Control runtime through its independently pinned
-// bootstrap SSH path. it has no routed-target or arbitrary-command API.
+// bootstrap SSH path. It has no routed-target or arbitrary-command API.
 package controlinstalltransport
 
 import (
@@ -37,7 +37,7 @@ var (
 )
 
 // Runner is the injectable SSH process boundary. argv excludes the executable
-// name. install always supplies one bounded payload reader and discard writers.
+// name. Install always supplies one bounded payload reader and discard writers.
 type Runner interface {
 	Run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) error
 }
@@ -48,7 +48,7 @@ func (defaultRunner) Run(ctx context.Context, argv []string, stdin io.Reader, st
 	return runSSH(ctx, argv, stdin, stdout, stderr)
 }
 
-// Executable is a descriptor-derived binding to the local flow binary. its
+// Executable is a descriptor-derived binding to the local flow binary. Its
 // path is deliberately opaque and cannot be JSON-encoded.
 type Executable struct {
 	path   string
@@ -60,13 +60,13 @@ type Executable struct {
 
 func (Executable) MarshalJSON() ([]byte, error) { return nil, ErrPrivatePathJSON }
 
-// Size and Digest expose only bounded public integrity metadata. the local
+// Size and Digest expose only bounded public integrity metadata. The local
 // path remains opaque and is revalidated when the payload is streamed.
 func (executable Executable) Size() int64    { return executable.size }
 func (executable Executable) Digest() string { return executable.digest }
 
 // NewExecutable validates and hashes a non-writable, owner-local, single-link
-// regular file. install reopens and revalidates the exact inode and digest.
+// regular file. Install reopens and revalidates the exact inode and digest.
 func NewExecutable(path string) (Executable, error) {
 	file, metadata, err := openExecutable(path)
 	if err != nil {
@@ -90,7 +90,7 @@ type Request struct {
 	MinimumGeneration   uint64
 }
 
-// Result exposes only bounded integrity and attempt metadata. remote output,
+// Result exposes only bounded integrity and attempt metadata. Remote output,
 // the local executable path and SSH argv are never returned.
 type Result struct {
 	Route            string `json:"route"`
@@ -137,14 +137,17 @@ func New(builder *sshtransport.Builder, runner Runner, options ...Option) *Trans
 }
 
 // InstallFirstControl performs exactly one pinned SSH process attempt and no
-// retry or fallback. the remote command is renderer-owned and contains only
-// validated public ids, decimal lengths and SHA-256 digests. binary and signed
+// retry or fallback. The remote command is renderer-owned and contains only
+// validated public IDs, decimal lengths and SHA-256 digests. Binary and signed
 // envelope bytes are concatenated on stdin, never placed in argv.
 func (transport *Transport) InstallFirstControl(ctx context.Context, request Request) (Result, error) {
-	result := Result{Route: "direct_first_control", FirstHopAlias: request.Control.Alias}
+	result := Result{Route: "direct_first_control"}
 	if transport == nil || transport.builder == nil || transport.runner == nil || transport.now == nil || ctx == nil ||
 		request.MinimumGeneration == 0 || len(request.Envelope) == 0 || len(request.Envelope) > controlruntime.MaxEnvelopeBytes {
 		return result, ErrInvalidInstall
+	}
+	if err := ctx.Err(); err != nil {
+		return result, safeInstallError(err, nil)
 	}
 	envelope, err := controlruntime.ParseCanonical(request.Envelope)
 	if err != nil {
@@ -177,6 +180,7 @@ func (transport *Transport) InstallFirstControl(ctx context.Context, request Req
 	if err != nil {
 		return result, ErrInvalidInstall
 	}
+	result.FirstHopAlias = request.Control.Alias
 	remoteCommand, err := renderRemoteCommand(request, result)
 	if err != nil {
 		return result, ErrInvalidInstall
@@ -187,11 +191,14 @@ func (transport *Transport) InstallFirstControl(ctx context.Context, request Req
 	stderr := boundedOutput{limit: MaxOutputBytes}
 	operation, cancel := context.WithTimeout(ctx, InstallTimeout)
 	defer cancel()
+	if err := operation.Err(); err != nil {
+		return result, safeInstallError(err, nil)
+	}
 	result.Attempts = 1
 	err = transport.runner.Run(operation, argv, stdin, &stdout, &stderr)
 	result.StdoutBytes, result.StderrBytes = stdout.kept, stderr.kept
 	result.StdoutTruncated, result.StderrTruncated = stdout.truncated, stderr.truncated
-	if err != nil {
+	if err != nil || operation.Err() != nil {
 		return result, safeInstallError(operation.Err(), err)
 	}
 	return result, nil
@@ -204,9 +211,9 @@ func renderRemoteCommand(request Request, result Result) (string, error) {
 		request.ExpectedControlName != request.envelopeControlName() {
 		return "", ErrInvalidInstall
 	}
-	// the root-owned temporary directory is claimed before stdin is written, so
+	// The root-owned temporary directory is claimed before stdin is written, so
 	// another process using the bootstrap account cannot replace the verified
-	// binary between hashing and sudo execution. every interpolated value has
+	// binary between hashing and sudo execution. Every interpolated value has
 	// already passed the signed policy's strict identifier grammar.
 	return "set -eu\n" +
 		"umask 077\n" +
@@ -221,7 +228,7 @@ func renderRemoteCommand(request Request, result Result) (string, error) {
 		"/usr/bin/sudo -n -- /usr/bin/dd if=\"$tmp/envelope.json\" status=none | /usr/bin/sudo -n -- \"$tmp/flow\" control-runtime install --expected-system " + request.ExpectedSystemID + " --expected-control " + request.ExpectedControlName + " --minimum-generation " + strconv.FormatUint(request.MinimumGeneration, 10) + "\n", nil
 }
 
-// these accessors intentionally parse the already authenticated envelope and
+// These accessors intentionally parse the already authenticated envelope and
 // are used only to keep renderer interpolation tied to those signed values.
 func (request Request) envelopeSystemID() string {
 	envelope, err := controlruntime.ParseCanonical(request.Envelope)
@@ -244,7 +251,7 @@ func openExecutable(path string) (*os.File, Executable, error) {
 		strings.ContainsRune(path, '\x00') || strings.IndexFunc(path, unicode.IsControl) >= 0 {
 		return nil, Executable{}, ErrUnsafeExecutable
 	}
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, Executable{}, ErrUnsafeExecutable
 	}

@@ -181,8 +181,8 @@ func (runner Runner) Run(ctx context.Context, inventory Inventory) (Report, []by
 	if runner.ValidateBinding == nil || runner.Remote == nil || runner.Control == nil {
 		return fail(blocked("local-preflight", "lab_runner_unavailable", "the bounded lab runner is not configured", "Run the repository-built flow binary from the initialized operator state."))
 	}
-	// resolve every local identity and pinned host key before the first network
-	// connection or mutation. a later host must never turn an earlier host into
+	// Resolve every local identity and pinned host key before the first network
+	// connection or mutation. A later host must never turn an earlier host into
 	// a partially executed lab.
 	for _, role := range requiredRoles() {
 		if err := runner.ValidateBinding(roleHosts[role]); err != nil {
@@ -435,7 +435,7 @@ func (runner Runner) runPBPSoak(ctx context.Context, report *Report, host Host, 
 	if err != nil || start.State != RemoteRunning {
 		return nil, failed(phase, "pbp_soak_start", "the fixed malwarelab soak service did not start", "Open the pinned VNC tunnel, ensure the malwarelab XFCE session is active, and inspect sanitized PBP logs.")
 	}
-	// keep this value in its original location so a real time.Time retains its
+	// Keep this value in its original location so a real time.Time retains its
 	// monotonic component. Remote timestamps are evidence, but they must not be
 	// able to make the local runner accept a run early.
 	localStarted := now()
@@ -454,8 +454,8 @@ func (runner Runner) runPBPSoak(ctx context.Context, report *Report, host Host, 
 		}
 		poll, pollErr := runner.Remote.Run(ctx, host, ActionPBPSoakPoll)
 		if pollErr != nil {
-			// the explicitly armed fail-closed phase can temporarily remove the
-			// management route. only the overall deadline may turn this into PASS/FAIL.
+			// The explicitly armed fail-closed phase can temporarily remove the
+			// management route. Only the overall deadline may turn this into PASS/FAIL.
 			if polls%3 == 0 {
 				runner.emit(Progress{Phase: phase, Host: host.Name, Status: "waiting (VPN fail-closed may temporarily remove SSH)"})
 			}

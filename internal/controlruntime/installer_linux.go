@@ -45,20 +45,20 @@ var bundleFiles = []managedFile{
 
 // CommandRunner is the sole process boundary used by the privileged installer.
 // executable and argv remain separate, stdin is always nil, and all output is
-// bounded by the caller. implementations must not invoke a shell.
+// bounded by the caller. Implementations must not invoke a shell.
 type CommandRunner interface {
 	Run(context.Context, string, []string, io.Reader, io.Writer, io.Writer) error
 }
 
 // ExecutableSource returns a descriptor for the exact runtime image to install.
-// the production source is the kernel-owned /proc/self/exe link, so pathname
+// The production source is the kernel-owned /proc/self/exe link, so pathname
 // replacement cannot change the bytes after this process has started.
 type ExecutableSource interface {
 	Open() (*os.File, error)
 	IsRunningExecutable() bool
 }
 
-// ProcessExecutableSource opens the currently running linux executable.
+// ProcessExecutableSource opens the currently running Linux executable.
 type ProcessExecutableSource struct{}
 
 func (ProcessExecutableSource) Open() (*os.File, error)   { return os.Open("/proc/self/exe") }
@@ -234,7 +234,7 @@ func (platform *linuxPlatform) Preflight(ctx context.Context, desired preparedIn
 	case dropInErr != nil:
 		return state, dropInErr
 	case bytes.Equal(dropIn, desired.files.SSHDPolicy):
-		// already exact.
+		// Already exact.
 	case bytes.HasPrefix(dropIn, []byte("# Managed by Dynamicflow.")):
 		state.InstallDropIn = true
 	default:
@@ -305,8 +305,8 @@ func (platform *linuxPlatform) EnsureManagementAccount(ctx context.Context, stat
 		}
 	}
 	if state.CreateAccount || state.LockAccount {
-		// a leading '!' from usermod --lock makes the account inaccessible to
-		// OpenSSH even for public-key authentication on linux. OpenSSH's own
+		// A leading '!' from usermod --lock makes the account inaccessible to
+		// OpenSSH even for public-key authentication on Linux. OpenSSH's own
 		// sshd(8) documentation recommends *NP* for a password-disabled account
 		// that must remain available to public-key authentication.
 		if err := platform.runDiscard(ctx, usermodPath, []string{"--password", disabledPasswordMarker, ManagementUser}); err != nil {
@@ -526,8 +526,15 @@ func (platform *linuxPlatform) runDiscard(ctx context.Context, executable string
 	}
 	operation, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
+	if err := operation.Err(); err != nil {
+		return safeInstallError(ErrInstallFailed, err)
+	}
 	stdout, stderr := &boundedCommandOutput{limit: maxCommandBytes}, &boundedCommandOutput{limit: maxCommandBytes}
-	if err := platform.runner.Run(operation, executable, append([]string(nil), arguments...), nil, stdout, stderr); err != nil {
+	err := platform.runner.Run(operation, executable, append([]string(nil), arguments...), nil, stdout, stderr)
+	if contextErr := operation.Err(); contextErr != nil {
+		return safeInstallError(ErrInstallFailed, contextErr)
+	}
+	if err != nil {
 		return safeInstallError(ErrInstallFailed, err)
 	}
 	return nil
@@ -608,8 +615,8 @@ func (platform *linuxPlatform) verifyBundle(directory *os.File, request InstallR
 	if err != nil {
 		return InstallEnvelope{}, err
 	}
-	// use the signed issuance instant to verify authenticity even when an old
-	// policy has expired. this permits a securely signed recovery update while
+	// Use the signed issuance instant to verify authenticity even when an old
+	// policy has expired. This permits a securely signed recovery update while
 	// still enforcing the new envelope's current validity in prepare().
 	if err := VerifyEnvelope(
 		envelope, envelope.Policy.Policy.IssuedAt, request.ExpectedSystemID,
@@ -724,7 +731,7 @@ func (platform *linuxPlatform) inspectRuntime() (executableSnapshot, bool, error
 	defer directory.Close()
 	destinationFD, err := syscall.Openat(
 		int(directory.Fd()), filepath.Base(platform.config.executable),
-		syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0,
+		syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0,
 	)
 	if errors.Is(err, syscall.ENOENT) || errors.Is(err, os.ErrNotExist) {
 		return snapshot, true, nil
@@ -871,7 +878,7 @@ func (platform *linuxPlatform) writeExecutable(directory *os.File, name string, 
 func (platform *linuxPlatform) validateConfiguration() error {
 	configuration := platform.config
 	if platform == nil || platform.runner == nil || platform.source == nil || configuration.effectiveUID == nil ||
-		!safeAbsolutePath(configuration.anchor) || !safeAbsolutePath(configuration.stateRoot) ||
+		!safeTrustAnchor(configuration.anchor) || !safeAbsolutePath(configuration.stateRoot) ||
 		!safeAbsolutePath(configuration.sshdConfig) || !safeAbsolutePath(configuration.sshdDropIn) ||
 		!safeAbsolutePath(configuration.executable) || filepath.Base(configuration.sshdDropIn) == "." ||
 		!pathInside(configuration.anchor, configuration.stateRoot) ||
@@ -1128,7 +1135,7 @@ type managedFile struct {
 }
 
 func openTrustedDirectory(anchor, target string, create bool, uid, gid uint32) (*os.File, error) {
-	if !safeAbsolutePath(anchor) || !safeAbsolutePath(target) || !pathInside(anchor, target) {
+	if !safeTrustAnchor(anchor) || !safeAbsolutePath(target) || !pathInside(anchor, target) {
 		return nil, ErrUnsafeHost
 	}
 	anchorFD, err := syscall.Open(anchor, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
@@ -1311,7 +1318,7 @@ func openOrCreateManagedFile(directory *os.File, name string, mode uint32, uid, 
 			return nil, false, chmodErr
 		}
 	} else if errors.Is(err, syscall.EEXIST) {
-		fd, err = syscall.Openat(int(directory.Fd()), name, syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		fd, err = syscall.Openat(int(directory.Fd()), name, syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	}
 	if err != nil {
 		return nil, false, err
@@ -1334,7 +1341,7 @@ func readManagedFileAt(directory *os.File, name string, mode, uid, gid uint32, l
 	if directory == nil || !validPathComponent(name) || limit < 1 {
 		return nil, ErrUnsafeHost
 	}
-	fd, err := syscall.Openat(int(directory.Fd()), name, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fd, err := syscall.Openat(int(directory.Fd()), name, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1393,7 +1400,7 @@ func sameStableFile(before, after syscall.Stat_t) bool {
 }
 
 func managedFileExists(directory *os.File, name string, mode, uid, gid uint32) (bool, error) {
-	fd, err := syscall.Openat(int(directory.Fd()), name, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fd, err := syscall.Openat(int(directory.Fd()), name, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ENOENT) || errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -1412,7 +1419,7 @@ func managedExecutableExists(directory *os.File, name string, uid, gid uint32) (
 	if directory == nil || !validPathComponent(name) {
 		return false, ErrUnsafeHost
 	}
-	fd, err := syscall.Openat(int(directory.Fd()), name, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fd, err := syscall.Openat(int(directory.Fd()), name, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ENOENT) || errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -1550,7 +1557,7 @@ func removeStaleRegularAt(directory *os.File, name string, uid, gid uint32, mode
 	if directory == nil || !validPathComponent(name) || len(modes) == 0 {
 		return ErrUnsafeHost
 	}
-	fd, err := syscall.Openat(int(directory.Fd()), name, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fd, err := syscall.Openat(int(directory.Fd()), name, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return err
 	}
@@ -1696,7 +1703,7 @@ func readProtectedFile(anchor, path string, uid, gid uint32, limit int64) ([]byt
 		return nil, err
 	}
 	defer directory.Close()
-	fd, err := syscall.Openat(int(directory.Fd()), filepath.Base(path), syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fd, err := syscall.Openat(int(directory.Fd()), filepath.Base(path), syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1756,6 +1763,12 @@ func mainIncludesDropIn(configuration []byte, dropInDirectory string) bool {
 		}
 	}
 	return false
+}
+
+// The filesystem root is the production trust anchor, but remains forbidden
+// as an installation destination. Tests may use an isolated non-root anchor.
+func safeTrustAnchor(value string) bool {
+	return value == "/" || safeAbsolutePath(value)
 }
 
 func pathInside(anchor, target string) bool {

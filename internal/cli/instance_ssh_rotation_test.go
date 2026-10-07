@@ -72,14 +72,14 @@ func TestInstanceSSHArgsOffersPreviousOnlyDuringRecordedOverlap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// the key was rotated locally but the overlap generation has not yet been
-	// published. both identities are needed to avoid a transient lockout.
+	// The key was rotated locally but the overlap generation has not yet been
+	// published. Both identities are needed to avoid a transient lockout.
 	args := assertSSHIdentityCount(t, ctx, "rotation-test", 2)
 	if !cliContainsPair(args, "-i", previousPaths.Private) {
 		t.Fatal("pre-publication overlap omitted the previous identity")
 	}
 
-	// publishing the overlap records the active generation and keeps the
+	// Publishing the overlap records the active generation and keeps the
 	// explicit pending bit until the target acknowledgement is observed.
 	local.KeyGeneration = rotated.Generation
 	local.RotationPending = true
@@ -88,7 +88,7 @@ func TestInstanceSSHArgsOffersPreviousOnlyDuringRecordedOverlap(t *testing.T) {
 	}
 	assertSSHIdentityCount(t, ctx, "rotation-test", 2)
 
-	// publishing old-key removal clears the overlap. the old private file is
+	// Publishing old-key removal clears the overlap. The old private file is
 	// retained as local audit/recovery evidence but must no longer enter argv.
 	local.RotationPending = false
 	if err := store.WriteJSON(filepath.Join("enrollments", "rotation-test.json"), local); err != nil {

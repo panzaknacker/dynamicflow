@@ -156,7 +156,7 @@ func TestAdminEnrollmentTLSControlReplayConflictExpiryAndAuditRedaction(t *testi
 	}
 	_ = readResponse(t, response)
 
-	// a control signature for one instance path is not valid for another.
+	// A control signature for one instance path is not valid for another.
 	statusPath := "/v1/admin/instances/vm-02/status"
 	statusAuthorization := fixture.controlAuthorization(t, fixture.controlPrivate, http.MethodGet, statusPath, nil)
 	response = fixture.request(t, http.MethodGet, "/v1/admin/instances/vm-03/status", nil, statusAuthorization)
@@ -165,7 +165,7 @@ func TestAdminEnrollmentTLSControlReplayConflictExpiryAndAuditRedaction(t *testi
 	}
 	_ = readResponse(t, response)
 
-	// the operator list is request-signed but never returns one-time secrets.
+	// The operator list is request-signed but never returns one-time secrets.
 	listAuthorization := fixture.controlAuthorization(t, fixture.controlPrivate, http.MethodGet, createPath, nil)
 	response = fixture.request(t, http.MethodGet, createPath, nil, listAuthorization)
 	if response.StatusCode != http.StatusOK {
@@ -416,7 +416,7 @@ func TestAdminDesiredRequiresIndependentValidSignatureAndMonotonicGeneration(t *
 	}
 	_ = readResponse(t, response)
 
-	// possession of the control key alone cannot forge desired-state authority.
+	// Possession of the control key alone cannot forge desired-state authority.
 	forged := second
 	forged.State.Profile = "pbp"
 	forgedBody := canonicalTestJSON(t, forged)
@@ -518,7 +518,7 @@ func TestAdminDesiredRejectsProfileTransitionWithoutPartialMutation(t *testing.T
 		t.Fatalf("rejected transition changed enrollment binding: before=%#v after=%#v err=%v", beforeRecord, afterRecord, err)
 	}
 
-	// the rejected generation was never committed; a same-profile update at
+	// The rejected generation was never committed; a same-profile update at
 	// that generation remains valid and proves normal apply is unchanged.
 	sameProfile := signDesiredFixture(
 		t, fixture.base.desiredPrivate, instance, "ssh", manifest.SetID, 2,
@@ -579,8 +579,8 @@ func TestAdminConfigurationSeparatesAllTrustKeysAndContainsNoPrivateKey(t *testi
 func TestAdminEnrollmentResumesDesiredFirstCrashPoint(t *testing.T) {
 	fixture := newAdminFixture(t)
 	desired := fixture.desired(t, "vm-resume", 1, fixture.base.releaseSet, fixture.base.now, fixture.base.now.Add(time.Hour))
-	// this is the safe state left by a crash after DesiredStore.Put but before
-	// enrollment.Create. retrying the exact request must create only the code.
+	// This is the safe state left by a crash after DesiredStore.Put but before
+	// enrollment.Create. Retrying the exact request must create only the code.
 	if err := fixture.desiredStore.Put(desired, fixture.base.releaseSet, fixture.base.now, time.Minute); err != nil {
 		t.Fatal(err)
 	}

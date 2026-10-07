@@ -1,5 +1,5 @@
-// package targetapply executes the small, fixed set of dynamicflow profile
-// installers. it consumes an already signature-verified apply plan and has no
+// Package targetapply executes the small, fixed set of Dynamicflow profile
+// installers. It consumes an already signature-verified apply plan and has no
 // generic command or remotely supplied argument facility.
 package targetapply
 
@@ -66,7 +66,7 @@ var (
 	secretLikeRE            = regexp.MustCompile(`[A-Za-z0-9_=-]{24,}|[0-9]{10,}`)
 )
 
-// FetchArtifact must stream exactly the signed artifact into destination. the
+// FetchArtifact must stream exactly the signed artifact into destination. The
 // caller verifies size and digest again before activation.
 type FetchArtifact func(context.Context, applyplan.Artifact, io.Writer) error
 
@@ -111,7 +111,7 @@ type runner struct {
 	logPaths           map[string]string
 }
 
-// LoadCheckpoint returns the last fully applied content-bound state. a
+// LoadCheckpoint returns the last fully applied content-bound state. A
 // missing checkpoint is represented by the zero value.
 func LoadCheckpoint(stateRoot string) (applyplan.Checkpoint, string, error) {
 	store, err := localstate.Open(stateRoot)
@@ -135,7 +135,7 @@ func LoadCheckpoint(stateRoot string) (applyplan.Checkpoint, string, error) {
 }
 
 // Run downloads immutable artifacts, then executes dependency-ordered phases
-// through reconcile's durable lock/journal. a checkpoint is advanced only
+// through reconcile's durable lock/journal. A checkpoint is advanced only
 // after every phase verifies.
 func Run(ctx context.Context, config Config) (Result, error) {
 	if ctx == nil || config.FetchArtifact == nil || validatePlan(config.Plan) != nil ||
@@ -201,7 +201,7 @@ func Run(ctx context.Context, config Config) (Result, error) {
 			return Result{}, readErr
 		}
 		if exists {
-			// a persona created before the first target checkpoint is already
+			// A persona created before the first target checkpoint is already
 			// stable and must not be silently replaced by this installation.
 			personaID = actual
 		}
@@ -212,7 +212,7 @@ func Run(ctx context.Context, config Config) (Result, error) {
 		return Result{PlanID: config.Plan.ID, LogPaths: r.logPaths}, err
 	}
 	if handoff {
-		// no profile phase or checkpoint may be written by the old executable.
+		// No profile phase or checkpoint may be written by the old executable.
 		return Result{PlanID: config.Plan.ID, HandoffRequired: true, LogPaths: r.logPaths}, nil
 	}
 	enginePlan := reconcile.Plan{
@@ -396,7 +396,7 @@ func validateAdminUser(name string) error {
 }
 
 // ValidateAdminUser verifies the fixed target administrator policy without
-// modifying the account. runtime enrollment uses the same policy before it
+// modifying the account. Runtime enrollment uses the same policy before it
 // persists the immutable instance binding.
 func ValidateAdminUser(name string) error { return validateAdminUser(name) }
 
@@ -627,8 +627,8 @@ func (r *runner) Rollback(ctx context.Context, name string, _ reconcile.Plan, _ 
 		return nil
 	}
 	if name == "ssh-gui" {
-		// a GUI verification failure can mean that VNC drifted onto a public
-		// listener. closing SSH alone would leave that listener reachable.
+		// A GUI verification failure can mean that VNC drifted onto a public
+		// listener. Closing SSH alone would leave that listener reachable.
 		if err := errors.Join(disableVNCFailClosed(ctx), disableSSHFailClosed(ctx)); err != nil {
 			return err
 		}
@@ -653,7 +653,7 @@ func (r *runner) Rollback(ctx context.Context, name string, _ reconcile.Plan, _ 
 // Revoke establishes the fixed local revoked state without running any
 // release-provided installer: SSH is stopped and disabled, authorized_keys is
 // atomically emptied, and an installed Mullvad client is confirmed in
-// lockdown mode. it shares targetapply's outer lock with Run.
+// lockdown mode. It shares targetapply's outer lock with Run.
 func Revoke(ctx context.Context, stateRoot, adminUser, profile string) error {
 	if ctx == nil || !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) == "/" ||
 		!userRE.MatchString(adminUser) || adminUser == "root" || adminUser == "malwarelab" ||
@@ -722,8 +722,8 @@ func disableVNCFailClosedWithBinaries(ctx context.Context, systemctlPath, ssPath
 	if ctx == nil || !filepath.IsAbs(systemctlPath) || !filepath.IsAbs(ssPath) {
 		return ErrInvalidConfig
 	}
-	// ignore the mutation result and prove the resulting state independently.
-	// this keeps retries idempotent when the unit was already disabled.
+	// Ignore the mutation result and prove the resulting state independently.
+	// This keeps retries idempotent when the unit was already disabled.
 	_ = exec.CommandContext(ctx, systemctlPath, "disable", "--now", vncUnit).Run()
 	if exec.CommandContext(ctx, systemctlPath, "is-active", "--quiet", vncUnit).Run() == nil {
 		return errors.New("VNC service remains active after fail-closed action")
@@ -968,7 +968,7 @@ func syncDirectory(path string) error {
 }
 
 func (r *runner) extract(phase, archive string) (string, func(), error) {
-	// VPN and PBP deliberately run as the unprivileged administrator. a
+	// VPN and PBP deliberately run as the unprivileged administrator. A
 	// private state-root staging tree is not traversable after runuser drops
 	// privileges, so use a random root-owned runtime directory whose contents
 	// remain read-only to that account. /run is root-controlled and ephemeral.
@@ -1060,7 +1060,7 @@ func (r *runner) runFixedInstaller(ctx context.Context, phase, root string) erro
 			command.Dir = root
 			command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "LANG=C.UTF-8", "LC_ALL=C.UTF-8"}
 		}
-		// secrets are read by the fixed installers from their controlling TTY;
+		// Secrets are read by the fixed installers from their controlling TTY;
 		// none are accepted in argv or environment. stdin is inherited only so
 		// a console invocation retains normal terminal semantics.
 		command.Stdin = os.Stdin
@@ -1210,7 +1210,7 @@ func openProtectedLog(path string) (*os.File, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	// start each attempt with a newly cleaned stream. this prevents legacy or
+	// Start each attempt with a newly cleaned stream. This prevents legacy or
 	// interrupted unsanitized output from being exposed through the managed
 	// log path and avoids a permanently exhausted append-only log.
 	fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0o600)
@@ -1262,8 +1262,8 @@ func (r *runner) verifySSH(ctx context.Context, access sshAccessPolicy) error {
 	if access > sshAccessGUI || validateTrustedExecutable("/usr/sbin/sshd") != nil {
 		return errors.New("SSH verifier is missing or unsafe")
 	}
-	// Verify the current administrator context and a root context. supplying
-	// -C is essential: sshd -t without it does not evaluate match blocks and
+	// Verify the current administrator context and a root context. Supplying
+	// -C is essential: sshd -T without it does not evaluate Match blocks and
 	// could therefore report a safe global policy while the real login context
 	// permits a weaker authentication method.
 	checks := []struct {
@@ -1271,7 +1271,7 @@ func (r *runner) verifySSH(ctx context.Context, access sshAccessPolicy) error {
 		access sshAccessPolicy
 	}{{r.config.AdminUser, access}, {"root", sshAccessCommon}}
 	if access == sshAccessGUI {
-		// DenyUsers can itself occur inside match. evaluate the untrusted GUI
+		// DenyUsers can itself occur inside Match. Evaluate the untrusted GUI
 		// identity instead of inferring its policy from the administrator.
 		checks = append(checks, struct {
 			user   string
@@ -1291,7 +1291,7 @@ func (r *runner) verifySSH(ctx context.Context, access sshAccessPolicy) error {
 			return err
 		}
 	}
-	// the release-provided bootstrap runs after the pre-activation. re-open the
+	// The release-provided bootstrap runs after the pre-activation. Re-open the
 	// account home one component at a time without following symlinks and prove
 	// that the installer did not drift the complete signed key set before the
 	// reconcile engine can commit this phase.
@@ -1916,9 +1916,9 @@ func readPersonaIDAt(path string) (string, error) {
 	return personaID, nil
 }
 
-// canonicalPersonaJSON matches python json.dumps(sort_keys=True,
+// canonicalPersonaJSON matches Python json.dumps(sort_keys=True,
 // separators=(",", ":"), ensure_ascii=True), which is the on-disk PBP
-// persona identity contract. it is deliberately local to PBP because release
+// persona identity contract. It is deliberately local to PBP because release
 // signing uses a different, integer-only canonical JSON subset.
 func canonicalPersonaJSON(value any) ([]byte, error) {
 	var output bytes.Buffer

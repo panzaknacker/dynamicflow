@@ -1,4 +1,4 @@
-// package safeview prepares untrusted text for display in a terminal UI.
+// Package safeview prepares untrusted text for display in a terminal UI.
 package safeview
 
 import (
@@ -14,11 +14,11 @@ const (
 
 // Text returns a valid UTF-8, terminal-safe representation of value containing
 // at most maxRunes visible runes.
-
-// terminal control sequences are replaced as one unit. other control bytes,
-// invalid UTF-8 and unicode bidirectional formatting controls are replaced
-// individually. when truncation is required, the final rune is an ellipsis and
-// counts toward maxRunes. a non-positive limit returns an empty string.
+//
+// Terminal control sequences are replaced as one unit. Other control bytes,
+// invalid UTF-8 and Unicode bidirectional formatting controls are replaced
+// individually. When truncation is required, the final rune is an ellipsis and
+// counts toward maxRunes. A non-positive limit returns an empty string.
 func Text(value string, maxRunes int) string {
 	if maxRunes <= 0 || value == "" {
 		return ""
@@ -97,7 +97,7 @@ func consumeEscape(value string, offset int) int {
 	}
 
 	// ECMA-48 escape functions consist of zero or more intermediate bytes
-	// followed by one final byte. if the sequence is incomplete, consume only
+	// followed by one final byte. If the sequence is incomplete, consume only
 	// the introducer and leave ordinary UTF-8 text to the main sanitizer.
 	cursor := next
 	for cursor < len(value) && value[cursor] >= 0x20 && value[cursor] <= 0x2f {
@@ -140,18 +140,18 @@ func consumeStringControl(value string, offset int) int {
 
 func isBidirectionalControl(r rune) bool {
 	switch r {
-	case '\u061c', // arabic letter mark
-		'\u200e', // left-to-right mark
-		'\u200f', // right-to-left mark
-		'\u202a', // left-to-right embedding
-		'\u202b', // right-to-left embedding
-		'\u202c', // pop directional formatting
-		'\u202d', // left-to-right override
-		'\u202e', // right-to-left override
-		'\u2066', // left-to-right isolate
-		'\u2067', // right-to-left isolate
-		'\u2068', // first strong isolate
-		'\u2069': // pop directional isolate
+	case '\u061c', // Arabic Letter Mark
+		'\u200e', // Left-to-Right Mark
+		'\u200f', // Right-to-Left Mark
+		'\u202a', // Left-to-Right Embedding
+		'\u202b', // Right-to-Left Embedding
+		'\u202c', // Pop Directional Formatting
+		'\u202d', // Left-to-Right Override
+		'\u202e', // Right-to-Left Override
+		'\u2066', // Left-to-Right Isolate
+		'\u2067', // Right-to-Left Isolate
+		'\u2068', // First Strong Isolate
+		'\u2069': // Pop Directional Isolate
 		return true
 	default:
 		return r >= '\u206a' && r <= '\u206f'

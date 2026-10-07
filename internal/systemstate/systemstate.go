@@ -1,8 +1,8 @@
-// package systemstate stores the operator's provider-independent systems.
-
-// the store deliberately contains only bounded public metadata. private key
+// Package systemstate stores the operator's provider-independent systems.
+//
+// The store deliberately contains only bounded public metadata. Private key
 // paths, bootstrap credentials, bearer tokens and other secrets have no field
-// in this schema. all mutations are serialized by localstate's owner-only
+// in this schema. All mutations are serialized by localstate's owner-only
 // flock and committed through one atomic registry replacement.
 package systemstate
 
@@ -14,8 +14,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
+	"syscall"
 	"time"
 
 	"dynamicflow/internal/localstate"
@@ -51,7 +54,7 @@ var (
 	errorCodeRE  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 )
 
-// Status is the lifecycle state of one complete dynamicflow system. the
+// Status is the lifecycle state of one complete Dynamicflow system. The
 // registry's ActiveSystemID is an operator selection and is intentionally
 // independent from this runtime status.
 type Status string
@@ -64,7 +67,7 @@ const (
 )
 
 // BootstrapState records only the non-secret progress of the first control
-// bootstrap. the private bootstrap identity and one-time material live in
+// bootstrap. The private bootstrap identity and one-time material live in
 // their purpose-built stores, never here.
 type BootstrapState string
 
@@ -79,7 +82,7 @@ const (
 )
 
 // TrustMetadata contains public key identifiers only. Generation zero means
-// that the complete trust set has not been committed yet. a committed set is
+// that the complete trust set has not been committed yet. A committed set is
 // all-or-nothing and every role must use a distinct key.
 type TrustMetadata struct {
 	Generation         uint64 `json:"generation"`
@@ -90,7 +93,7 @@ type TrustMetadata struct {
 	ControlPolicyKeyID string `json:"control_policy_key_id,omitempty"`
 }
 
-// BootstrapMetadata is bounded audit metadata. fingerprints are canonical
+// BootstrapMetadata is bounded audit metadata. Fingerprints are canonical
 // OpenSSH SHA256 fingerprints; no public-key body, private path or secret is
 // accepted by this schema.
 type BootstrapMetadata struct {
@@ -103,7 +106,7 @@ type BootstrapMetadata struct {
 	FailureCode             string         `json:"failure_code,omitempty"`
 }
 
-// System is one provider-independent dynamicflow control domain. Revision is
+// System is one provider-independent Dynamicflow control domain. Revision is
 // an optimistic-concurrency token managed exclusively by Store.Update.
 type System struct {
 	Schema    int               `json:"schema"`
@@ -126,7 +129,7 @@ type Registry struct {
 	Systems        []System `json:"systems"`
 }
 
-// Option configures a Store. production callers should normally omit all
+// Option configures a Store. Production callers should normally omit all
 // options and use crypto/rand.Reader plus time.Now.
 type Option func(*Store)
 
@@ -139,7 +142,7 @@ func WithClock(clock func() time.Time) Option {
 	}
 }
 
-// WithRandomReader injects the entropy source used only for system ids.
+// WithRandomReader injects the entropy source used only for system IDs.
 func WithRandomReader(reader io.Reader) Option {
 	return func(store *Store) {
 		if reader != nil {
@@ -155,7 +158,7 @@ type Store struct {
 	random io.Reader
 }
 
-// New validates any existing registry immediately. corruption and unknown
+// New validates any existing registry immediately. Corruption and unknown
 // schemas are never treated as an empty registry.
 func New(state *localstate.Store, options ...Option) (*Store, error) {
 	if state == nil {
@@ -229,7 +232,7 @@ func (store *Store) GetByName(name string) (System, error) {
 	return System{}, ErrNotFound
 }
 
-// Active returns the selected operator system. a non-empty registry is always
+// Active returns the selected operator system. A non-empty registry is always
 // required to have an active selection.
 func (store *Store) Active() (System, error) {
 	registry, err := store.Snapshot()
@@ -248,8 +251,8 @@ func (store *Store) Active() (System, error) {
 }
 
 // CreateOrGet atomically creates the first revision for name or returns the
-// exact existing record. concurrent callers for the same name observe one ID;
-// only one receives created=true. the first system becomes the active context.
+// exact existing record. Concurrent callers for the same name observe one ID;
+// only one receives created=true. The first system becomes the active context.
 func (store *Store) CreateOrGet(name string) (result System, created bool, err error) {
 	if !systemNameRE.MatchString(name) {
 		return System{}, false, ErrInvalidName
@@ -305,7 +308,7 @@ func (store *Store) CreateOrGet(name string) (result System, created bool, err e
 
 // Update performs a compare-and-swap mutation of status, trust and bootstrap
 // metadata. Schema, identity, name, revisions and timestamps are store-owned.
-// the callback operates on a detached copy and cannot partially mutate disk.
+// The callback operates on a detached copy and cannot partially mutate disk.
 func (store *Store) Update(id string, expectedRevision uint64, mutate func(*System) error) (result System, err error) {
 	if !systemIDRE.MatchString(id) || expectedRevision == 0 || mutate == nil {
 		return System{}, ErrInvalidSystem
@@ -363,8 +366,8 @@ func (store *Store) Update(id string, expectedRevision uint64, mutate func(*Syst
 	return result, err
 }
 
-// SetActive compare-and-swaps the registry selection. retired systems cannot
-// become active. re-selecting the current system is an idempotent no-op when
+// SetActive compare-and-swaps the registry selection. Retired systems cannot
+// become active. Re-selecting the current system is an idempotent no-op when
 // the supplied registry revision is current.
 func (store *Store) SetActive(id string, expectedRegistryRevision uint64) (result System, err error) {
 	if !systemIDRE.MatchString(id) || expectedRegistryRevision == 0 {
@@ -414,6 +417,9 @@ func (store *Store) load() (Registry, error) {
 	var registry Registry
 	if err := store.state.ReadJSON(registryPath, &registry); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if err := store.checkUninitializedDirectory(); err != nil {
+				return Registry{}, err
+			}
 			return Registry{}, os.ErrNotExist
 		}
 		return Registry{}, fmt.Errorf("%w: %v", ErrInvalidStore, err)
@@ -422,6 +428,75 @@ func (store *Store) load() (Registry, error) {
 		return Registry{}, err
 	}
 	return registry, nil
+}
+
+// A missing registry is an initial state only when no system data exists.
+// Treating a lost registry as empty could create replacement signing roots
+// alongside the original identities and silently abandon their trust bindings.
+func (store *Store) checkUninitializedDirectory() error {
+	path, err := store.state.Path("systems")
+	if err != nil {
+		return ErrInvalidStore
+	}
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	if errors.Is(err, syscall.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return ErrInvalidStore
+	}
+	directory := os.NewFile(uintptr(fd), path)
+	defer directory.Close()
+	info, err := directory.Stat()
+	if err != nil || info.Mode().Perm() != localstate.DirMode {
+		return ErrInvalidStore
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != os.Geteuid() {
+		return ErrInvalidStore
+	}
+	// A killed first atomic write may leave private temporary registry files.
+	// They are not committed state and are never adopted or removed here. The
+	// directory remains bounded, and any actual system data still fails closed.
+	const maxInitializationEntries = 64
+	entries, err := directory.ReadDir(maxInitializationEntries + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return ErrInvalidStore
+	}
+	if len(entries) > maxInitializationEntries {
+		return fmt.Errorf("%w: too many uncommitted initialization files", ErrInvalidStore)
+	}
+	for _, entry := range entries {
+		if (entry.Name() != filepath.Base(registryLock) && !initialRegistryTemporaryName(entry.Name())) || !entry.Type().IsRegular() {
+			return fmt.Errorf("%w: system data exists without its registry", ErrInvalidStore)
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != localstate.FileMode || info.Size() > 8<<20 {
+			return ErrInvalidStore
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Nlink != 1 || int(stat.Uid) != os.Geteuid() {
+			return ErrInvalidStore
+		}
+	}
+	return nil
+}
+
+func initialRegistryTemporaryName(name string) bool {
+	const prefix = ".registry.json.tmp-"
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(name, prefix)
+	if len(suffix) == 0 || len(suffix) > 20 {
+		return false
+	}
+	for _, digit := range suffix {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (store *Store) allocateID(registry Registry) (string, error) {

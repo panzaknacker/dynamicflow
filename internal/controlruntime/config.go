@@ -1,5 +1,5 @@
-// package controlruntime validates the public installation envelope and
-// renders the narrow SSH gateway configuration used by a control node. OS
+// Package controlruntime validates the public installation envelope and
+// renders the narrow SSH gateway configuration used by a Control node. OS
 // mutation is intentionally kept outside this pure verification boundary.
 package controlruntime
 
@@ -41,7 +41,7 @@ type InstallEnvelope struct {
 	Policy                 controlpolicy.SignedPolicy `json:"policy"`
 }
 
-// RenderedFiles contains public verified content only. destinations are fixed
+// RenderedFiles contains public verified content only. Destinations are fixed
 // by the privileged installer and are deliberately not represented here.
 type RenderedFiles struct {
 	EnvelopeJSON    []byte
@@ -71,7 +71,7 @@ func NewEnvelope(systemID, controlName string, publicPEM []byte, signed controlp
 }
 
 // VerifyEnvelope authenticates the policy against the independently delivered
-// control-policy public root and exact system/node/generation binding.
+// Control-policy public root and exact system/node/generation binding.
 func VerifyEnvelope(envelope InstallEnvelope, now time.Time, expectedSystemID, expectedControlName string, minimumGeneration uint64) error {
 	publicKey, err := validateEnvelopeShape(envelope)
 	if err != nil {
@@ -118,7 +118,7 @@ func ParseCanonical(data []byte) (InstallEnvelope, error) {
 	return envelope, nil
 }
 
-// Render verifies before producing any privileged file content. the caller
+// Render verifies before producing any privileged file content. The caller
 // must still atomically install these bytes with root ownership, safe modes,
 // sshd -t validation and rollback on reload failure.
 func Render(envelope InstallEnvelope, now time.Time, expectedSystemID, expectedControlName string, minimumGeneration uint64, stateRoot string) (RenderedFiles, error) {
@@ -174,8 +174,8 @@ func renderSSHDPolicy(stateRoot string) (string, error) {
 	if !safeAbsolutePath(stateRoot) {
 		return "", ErrInvalidEnvelope
 	}
-	// the privileged installer activates all policy files as one directory.
-	// keeping AuthorizedKeysFile inside that directory means a policy/key
+	// The privileged installer activates all policy files as one directory.
+	// Keeping AuthorizedKeysFile inside that directory means a policy/key
 	// rotation cannot expose a mixture of generations.
 	authorizedKeys := filepath.Join(stateRoot, ActiveBundleName, "authorized_keys")
 	return `# Managed by Dynamicflow. Local edits are replaced by a newer signed policy.

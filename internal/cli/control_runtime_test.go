@@ -200,6 +200,9 @@ func TestControlRuntimeInstallerFailuresAreClassifiedWithoutCauseOrStdin(t *test
 		{"sshd reload", controlruntime.ErrSSHDReload, "control_sshd_reload", exitFailure},
 		{"rollback", controlruntime.ErrInstallRollback, "control_recovery_required", exitPartial},
 		{"cancelled", context.Canceled, "control_install_interrupted", exitPartial},
+		{"cancelled reload", errors.Join(controlruntime.ErrSSHDReload, context.Canceled), "control_install_interrupted", exitPartial},
+		{"cancelled validation", errors.Join(controlruntime.ErrSSHDValidation, context.DeadlineExceeded), "control_install_interrupted", exitPartial},
+		{"cancelled rollback failure", errors.Join(controlruntime.ErrInstallRollback, controlruntime.ErrSSHDReload, context.Canceled), "control_recovery_required", exitPartial},
 		{"generic", controlruntime.ErrInstallFailed, "control_install", exitFailure},
 	}
 	for _, test := range tests {

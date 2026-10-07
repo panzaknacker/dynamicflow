@@ -1,7 +1,7 @@
-// package applyplan derives an immutable target installation plan exclusively
+// Package applyplan derives an immutable target installation plan exclusively
 // from independently verified release and desired-state metadata.
-
-// it deliberately does not download artifacts or execute installers. callers
+//
+// It deliberately does not download artifacts or execute installers. Callers
 // can therefore persist and display the plan before handing its phases to the
 // fixed reconciliation engine.
 package applyplan
@@ -43,7 +43,7 @@ var (
 	digestRE       = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
-// Checkpoint is the last successfully accepted state on this instance. it
+// Checkpoint is the last successfully accepted state on this instance. It
 // prevents a correctly signed older release or desired-state document from
 // producing an installation plan. DesiredStateID also rejects different
 // content reissued with an already accepted desired generation.
@@ -78,7 +78,7 @@ type Artifact struct {
 }
 
 // Step is one fixed component action within a declarative profile phase.
-// its ID is stable across repeated planning of the same profile graph.
+// Its ID is stable across repeated planning of the same profile graph.
 type Step struct {
 	ID       string   `json:"id"`
 	Artifact Artifact `json:"artifact"`
@@ -109,7 +109,7 @@ type Plan struct {
 	Phases            []Phase  `json:"phases"`
 }
 
-// Build verifies both trust domains and derives a dependency-first plan. a
+// Build verifies both trust domains and derives a dependency-first plan. A
 // returned plan contains only metadata that was covered by the release or
 // desired-state signature and checked against the local profile registry.
 func Build(
@@ -254,7 +254,7 @@ func Build(
 
 // selectRuntimeArtifact intentionally differs from selectArtifact: the binary
 // that replaces /usr/local/bin/flow must be built for the exact runtime target.
-// a target-independent ("any") artifact is never a valid executable update.
+// A target-independent ("any") artifact is never a valid executable update.
 func selectRuntimeArtifact(manifest release.Manifest, target string) (release.Component, error) {
 	candidates := make([]release.Component, 0, 2)
 	for _, component := range manifest.Components {
@@ -338,8 +338,8 @@ func selectArtifact(manifest release.Manifest, componentName, target string) (re
 	case 0:
 		return release.Component{}, fmt.Errorf("%w: %s for %s", ErrMissingArtifact, componentName, target)
 	case 1:
-		// continue below so the explicit revocation defense remains in place
-		// even if release.validate is relaxed in a future schema.
+		// Continue below so the explicit revocation defense remains in place
+		// even if release.Validate is relaxed in a future schema.
 	default:
 		return release.Component{}, fmt.Errorf("%w: %s has %d candidates for %s/any", ErrAmbiguousArtifact, componentName, len(candidates), target)
 	}

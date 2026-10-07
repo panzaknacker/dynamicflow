@@ -1,5 +1,5 @@
-// package controlpolicy defines the signed, narrowly scoped forwarding policy
-// installed on a dynamicflow control node. the policy contains public trust
+// Package controlpolicy defines the signed, narrowly scoped forwarding policy
+// installed on a Dynamicflow Control node. The policy contains public trust
 // material only; it never carries SSH private keys, bearer tokens or commands.
 package controlpolicy
 
@@ -67,8 +67,8 @@ const (
 	ActionServingAdmin      Action = "serving_admin"
 )
 
-// ManagementKey is an owner-local public SSH identity authorized on control.
-// a policy has exactly one active key and at most one overlapping pending key.
+// ManagementKey is an owner-local public SSH identity authorized on Control.
+// A policy has exactly one active key and at most one overlapping pending key.
 type ManagementKey struct {
 	Name        string   `json:"name"`
 	Generation  uint64   `json:"generation"`
@@ -263,8 +263,8 @@ func ParseCanonical(data []byte) (SignedPolicy, error) {
 	return signed, nil
 }
 
-// RenderAuthorizedKeys creates a deterministic forced-command key set. with
-// zero routes, port forwarding remains disabled by restrict. with routes,
+// RenderAuthorizedKeys creates a deterministic forced-command key set. With
+// zero routes, port forwarding remains disabled by restrict. With routes,
 // forwarding is re-enabled only for the exact permitopen allowlist.
 func RenderAuthorizedKeys(policy Policy) ([]byte, error) {
 	if err := Validate(policy); err != nil {
@@ -337,7 +337,7 @@ func safeHost(host string) bool {
 		}
 	}
 	if numericAddress {
-		// reject legacy numeric IPv4 spellings rather than allowing libc/OpenSSH
+		// Reject legacy numeric IPv4 spellings rather than allowing libc/OpenSSH
 		// to reinterpret them differently from the policy verifier.
 		return false
 	}
@@ -375,7 +375,7 @@ func clonePolicy(policy Policy) Policy {
 	return result
 }
 
-// SortCanonical is an explicit construction helper. validation itself never
+// SortCanonical is an explicit construction helper. Validation itself never
 // silently sorts signed input.
 func SortCanonical(policy Policy) Policy {
 	result := clonePolicy(policy)

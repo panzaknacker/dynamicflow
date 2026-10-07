@@ -1,6 +1,6 @@
-// package servingruntime assembles the narrow HTTPS serving process from a
+// Package servingruntime assembles the narrow HTTPS serving process from a
 // root-created configuration containing only public trust material and a
-// transport TLS key. release and desired-state private signing keys are never
+// transport TLS key. Release and desired-state private signing keys are never
 // accepted by this package.
 package servingruntime
 
@@ -112,7 +112,7 @@ func Validate(config Config) error {
 	return nil
 }
 
-// Run serves until ctx is cancelled. the caller should run this function as a
+// Run serves until ctx is cancelled. The caller should run this function as a
 // dedicated unprivileged service account.
 func Run(ctx context.Context, configPath string) error {
 	config, err := Load(configPath)

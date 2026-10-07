@@ -8,10 +8,11 @@ import (
 	"dynamicflow/internal/application"
 )
 
-const controlCheckUsage = "usage: flow control check NAME [--plan]"
+const controlCheckUsage = "usage: flow control check NAME [--plan] [--expect-system SYS_ID]"
 
 func controlCheck(ctx *commandContext, args []string) int {
 	flags := newCommandFlagSet(ctx, "control check")
+	meta := registerControlSystemExpectation(flags)
 	plan := flags.Bool("plan", false, "preview the one fixed pinned connectivity attempt without opening a socket")
 	if err := parseInterspersed(flags, args); err != nil || flags.NArg() != 1 {
 		return usage(ctx, controlCheckUsage)
@@ -21,7 +22,7 @@ func controlCheck(ctx *commandContext, args []string) int {
 		return ctx.out.fail("system_state", err.Error(), "Repair FLOW_HOME ownership, mode or registry state.", exitConfig)
 	}
 	request := application.CheckControlRequest{
-		Meta: application.RequestMeta{Surface: application.SurfaceCLI}, Name: flags.Arg(0),
+		Meta: *meta, Name: flags.Arg(0),
 	}
 	if *plan {
 		result, err := app.PlanControlCheck(context.Background(), request)
@@ -43,7 +44,9 @@ func controlCheck(ctx *commandContext, args []string) int {
 	observer := application.ObserverFunc(func(event application.Event) {
 		ctx.out.phase(event.Phase, event.Status, event.Detail)
 	})
-	result, err := app.CheckControl(context.Background(), request, observer)
+	operation, stop := commandOperationContext()
+	defer stop()
+	result, err := app.CheckControl(operation, request, observer)
 	if err != nil {
 		return emitApplicationError(ctx, err)
 	}

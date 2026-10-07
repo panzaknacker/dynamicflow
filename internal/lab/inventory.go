@@ -1,5 +1,5 @@
-// package lab reads the deliberately small, gitignored lab inventory format.
-// it is intentionally not a general YAML parser: accepting only the documented
+// Package lab reads the deliberately small, gitignored lab inventory format.
+// It is intentionally not a general YAML parser: accepting only the documented
 // scalar schema keeps host, user and key-path interpretation unambiguous.
 package lab
 

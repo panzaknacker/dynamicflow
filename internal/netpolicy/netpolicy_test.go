@@ -18,6 +18,7 @@ var (
 )
 
 func TestAllowedPolicyMatrix(t *testing.T) {
+	assertAllowed(t, validDirectInput(ActionControlAttest), ModeDirectControlProof, ReasonAllowControlProof)
 	for _, action := range []Action{ActionFirstControlCheck, ActionControlInstall} {
 		t.Run("direct-"+string(action), func(t *testing.T) {
 			assertAllowed(t, validDirectInput(action), ModeDirectFirstControl, ReasonAllowFirstControl)
@@ -823,6 +824,11 @@ func assertDenied(t *testing.T, input Input, reason Reason) {
 func assertAllowedInvariant(t *testing.T, input Input, decision Decision) {
 	t.Helper()
 	switch decision.Mode() {
+	case ModeDirectControlProof:
+		if input.Source != ActorOperator || input.Destination != ActorControl || input.ControlReady || input.ControlRevoked ||
+			input.Bootstrap != BootstrapControlPending || !input.Authority.Human || input.Action != ActionControlAttest || controlDestinationBinding(input) != "" {
+			t.Fatalf("pending Control proof invariant violated by %#v", input)
+		}
 	case ModeDirectFirstControl:
 		if input.Source != ActorOperator || input.Destination != ActorControl || input.ControlReady || input.ControlRevoked ||
 			input.Bootstrap != BootstrapControlPending || !input.Authority.Human ||
@@ -881,7 +887,7 @@ func assertJSONKeyAllowlist(t *testing.T, data []byte) {
 
 func allActions() []Action {
 	return []Action{
-		ActionFirstControlCheck, ActionControlInstall, ActionServingBootstrap,
+		ActionFirstControlCheck, ActionControlInstall, ActionControlAttest, ActionServingBootstrap,
 		ActionInstanceBootstrap, ActionDesiredStateUpdate, ActionSSH, ActionExec,
 		ActionVNC, ActionStatus, ActionReleasePull, ActionRecovery,
 	}

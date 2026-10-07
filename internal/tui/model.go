@@ -20,21 +20,37 @@ const (
 	screenControlCheckConfirm
 	screenControlInstallConfirm
 	screenControlInstallPrepared
+	screenControlApplyConfirm
+	screenControlApplyDone
+	screenControlAttestConfirm
+	screenControlAttestDone
+	screenSystemSelect
+	screenSystemSelectConfirm
 )
 
 var systemCharacter = regexp.MustCompile(`^[A-Za-z0-9._-]$`)
 
 type model struct {
-	ctx      context.Context
-	app      *application.Application
-	snapshot application.DashboardSnapshot
-	screen   screen
-	width    int
-	height   int
-	name     string
-	busy     bool
-	error    string
-	color    bool
+	ctx        context.Context
+	app        *application.Application
+	snapshot   application.DashboardSnapshot
+	screen     screen
+	width      int
+	height     int
+	name       string
+	busy       bool
+	error      string
+	color      bool
+	scroll     int
+	help       bool
+	helpScroll int
+
+	operationCancel context.CancelFunc
+	operationID     uint64
+	operationLabel  string
+	progress        application.Event
+	quitPending     bool
+	send            func(tea.Msg)
 
 	bindForm    controlBindForm
 	bindRequest application.BindControlRequest
@@ -42,6 +58,15 @@ type model struct {
 	checkPlan   *application.CheckControlPlan
 	installPlan *application.PrepareControlInstallPlan
 	installDone *controlInstallReceipt
+	applyPlan   *application.InstallPreparedControlPlan
+	applyDone   *controlApplyReceipt
+	attestPlan  *application.AttestControlPlan
+	attestDone  *application.ControlProofEvidence
+
+	systemQuery        string
+	systemSelection    int
+	systemSelectPlan   *application.SelectSystemPlan
+	selectAfterRefresh string
 }
 
 type initSystemMsg struct {
@@ -64,15 +89,84 @@ func newModel(ctx context.Context, app *application.Application, snapshot applic
 	return model{ctx: ctx, app: app, snapshot: snapshot, width: 100, height: 30, color: color}
 }
 
-func (model model) Init() tea.Cmd { return nil }
+func (model model) Init() tea.Cmd {
+	if model.ctx.Done() == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		<-model.ctx.Done()
+		return quitRequestMsg{}
+	}
+}
 
-func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+func (current model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if operationFinished(message) {
+		current.finishOperation()
+		if current.quitPending {
+			return current, tea.Quit
+		}
+	}
+	switch typed := message.(type) {
+	case quitRequestMsg, tea.InterruptMsg:
+		return current.requestQuit()
+	case operationProgressMsg:
+		if current.busy && typed.id == current.operationID {
+			current.progress = typed.event
+		}
+		return current, nil
+	case tea.PasteMsg:
+		if current.busy || current.help || !current.textInputScreen() {
+			return current, nil
+		}
+		// Bubble Tea's bracketed-paste event is text input only. Never route
+		// pasted shortcut names through navigation or confirmation handling.
+		message = tea.KeyPressMsg(tea.Key{Text: typed.Content})
+	case tea.KeyPressMsg:
+		if typed.Text == "" && typed.String() == "ctrl+c" {
+			return current.requestQuit()
+		}
+		if typed.String() == "f1" && typed.Text == "" || typed.String() == "?" &&
+			(current.help || !current.textInputScreen()) {
+			current.help = !current.help
+			current.helpScroll = 0
+			return current, nil
+		}
+		if current.help && typed.Text == "" && typed.String() == "esc" {
+			current.help = false
+			return current, nil
+		}
+		if current.scrollKey(typed) {
+			return current, nil
+		}
+		if current.help {
+			return current, nil
+		}
+	}
+	previousScreen, previousField, previousError := current.screen, current.bindForm.Field, current.error
+	previousName, previousForm := current.name, current.bindForm
+	previousQuery, previousSelection := current.systemQuery, current.systemSelection
+	updated, command := current.update(message)
+	result := updated.(model)
+	if result.screen != previousScreen || result.error != previousError {
+		result.scroll = 0
+	}
+	if result.screen != previousScreen || result.bindForm.Field != previousField ||
+		result.name != previousName || result.bindForm != previousForm ||
+		result.systemQuery != previousQuery || result.systemSelection != previousSelection {
+		result.revealInput(result.screen == previousScreen && result.bindForm.Field == previousField)
+	}
+	if _, resized := message.(tea.WindowSizeMsg); resized && result.error == "" {
+		result.revealInput(false)
+	}
+	result.clampScroll()
+	return result, command
+}
+
+func (model model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch typed := message.(type) {
 	case tea.WindowSizeMsg:
 		model.width, model.height = typed.Width, typed.Height
 		return model, nil
-	case tea.InterruptMsg:
-		return model, tea.Quit
 	case initSystemMsg:
 		model.busy = false
 		if typed.err != nil {
@@ -81,7 +175,11 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		model.screen = screenDashboard
 		model.error = ""
-		return model, refreshCommand(model.ctx, model.app)
+		if model.snapshot.ActiveSystemID != "" && typed.result.System.ID != model.snapshot.ActiveSystemID {
+			model.selectAfterRefresh = typed.result.System.ID
+		}
+		ctx := model.beginOperation("Refreshing dashboard")
+		return model, refreshCommand(ctx, model.app)
 	case dashboardMsg:
 		model.busy = false
 		if typed.err != nil {
@@ -90,7 +188,31 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		model.snapshot = typed.snapshot
 		model.error = ""
+		if target := model.selectAfterRefresh; target != "" {
+			model.selectAfterRefresh = ""
+			if target != model.snapshot.ActiveSystemID {
+				model.openSystemSelect(target)
+			}
+		}
 		return model, nil
+	case systemSelectPlanMsg:
+		if typed.err != nil {
+			model.setError(typed.err)
+			return model, nil
+		}
+		model.systemSelectPlan = &typed.plan
+		model.screen, model.error = screenSystemSelectConfirm, ""
+		return model, nil
+	case systemSelectMsg:
+		if typed.err != nil {
+			model.setError(typed.err)
+			return model, nil
+		}
+		model.systemSelectPlan = nil
+		model.systemQuery = ""
+		model.screen = screenDashboard
+		ctx := model.beginOperation("Refreshing selected system")
+		return model, refreshCommand(ctx, model.app)
 	case controlBindPlanMsg:
 		model.busy = false
 		if typed.err != nil {
@@ -114,7 +236,8 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.bindPlan = nil
 		model.error = ""
 		model.busy = true
-		return model, refreshCommand(model.ctx, model.app)
+		ctx := model.beginOperation("Refreshing dashboard")
+		return model, refreshCommand(ctx, model.app)
 	case controlCheckPlanMsg:
 		model.busy = false
 		if typed.err != nil {
@@ -135,7 +258,8 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.checkPlan = nil
 		model.error = ""
 		model.busy = true
-		return model, refreshCommand(model.ctx, model.app)
+		ctx := model.beginOperation("Refreshing dashboard")
+		return model, refreshCommand(ctx, model.app)
 	case controlInstallPlanMsg:
 		model.busy = false
 		if typed.err != nil {
@@ -158,9 +282,52 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.screen = screenControlInstallPrepared
 		model.error = ""
 		return model, nil
+	case controlApplyPlanMsg:
+		model.busy = false
+		if typed.err != nil {
+			model.setError(typed.err)
+			return model, nil
+		}
+		model.applyPlan = &typed.plan
+		model.applyDone = nil
+		model.screen, model.error = screenControlApplyConfirm, ""
+		return model, nil
+	case controlApplyMsg:
+		model.busy = false
+		if typed.err != nil {
+			model.setError(typed.err)
+			return model, nil
+		}
+		model.applyPlan = nil
+		model.applyDone = &controlApplyReceipt{SystemID: typed.result.SystemID, ControlName: typed.result.Control.Name, EnvelopeDigest: typed.result.EnvelopeDigest,
+			ExecutableDigest: typed.result.ExecutableDigest, PolicyGeneration: typed.result.PolicyGeneration,
+			NetworkConnections: typed.result.NetworkConnections, AlreadyInstalled: typed.result.AlreadyInstalled}
+		model.screen, model.error = screenControlApplyDone, ""
+		return model, nil
+	case controlAttestPlanMsg:
+		model.busy = false
+		if typed.err != nil {
+			model.setError(typed.err)
+			return model, nil
+		}
+		model.attestPlan = &typed.plan
+		model.attestDone = nil
+		model.screen, model.error = screenControlAttestConfirm, ""
+		return model, nil
+	case controlAttestMsg:
+		model.busy = false
+		if typed.err != nil {
+			model.setError(typed.err)
+			return model, nil
+		}
+		model.attestPlan = nil
+		evidence := typed.result.Evidence
+		model.attestDone = &evidence
+		model.screen, model.error = screenControlAttestDone, ""
+		return model, nil
 	case tea.KeyPressMsg:
 		key := typed.String()
-		if key == "ctrl+c" || (key == "q" && model.screen == screenDashboard && !model.busy) {
+		if key == "q" && model.screen == screenDashboard && !model.busy {
 			return model, tea.Quit
 		}
 		if model.busy {
@@ -170,9 +337,13 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			switch key {
 			case "n":
 				model.screen, model.name, model.error = screenNewSystem, "", ""
+			case "s":
+				if len(model.snapshot.Systems) != 0 {
+					model.openSystemSelect(model.snapshot.ActiveSystemID)
+				}
 			case "r":
-				model.busy = true
-				return model, refreshCommand(model.ctx, model.app)
+				ctx := model.beginOperation("Refreshing dashboard")
+				return model, refreshCommand(ctx, model.app)
 			case "b":
 				if capabilityAllowed(model.snapshot, "control.bind") && model.snapshot.Bootstrap != nil {
 					model.bindForm = newControlBindForm(model.snapshot.Bootstrap.ControlName)
@@ -187,7 +358,8 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					if name != "" {
 						model.busy = true
 						model.error = ""
-						return model, planControlCheckCommand(model.ctx, model.app, name)
+						ctx := model.beginOperation("Planning Control connectivity check")
+						return model, planControlCheckCommand(ctx, model.app, model.snapshot.ActiveSystemID, name)
 					}
 				}
 			case "i":
@@ -196,11 +368,31 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					if name != "" {
 						model.busy = true
 						model.error = ""
-						return model, planControlInstallCommand(model.ctx, model.app, name)
+						ctx := model.beginOperation("Planning local Control preparation")
+						return model, planControlInstallCommand(ctx, model.app, model.snapshot.ActiveSystemID, name)
 					}
+				}
+			case "p":
+				if capabilityAllowed(model.snapshot, "control.apply") {
+					model.busy, model.error = true, ""
+					ctx := model.beginOperation("Planning Control runtime installation")
+					return model, planControlApplyCommand(ctx, model.app, model.snapshot.ActiveSystemID, guidedControlName(model.snapshot))
+				}
+			case "a":
+				if capabilityAllowed(model.snapshot, "control.attest") {
+					model.busy, model.error = true, ""
+					ctx := model.beginOperation("Planning management-access verification")
+					return model, planControlAttestCommand(ctx, model.app, model.snapshot.ActiveSystemID, guidedControlName(model.snapshot))
 				}
 			}
 			return model, nil
+		}
+		if model.screen == screenSystemSelect || model.screen == screenSystemSelectConfirm {
+			return model.updateSystemSelect(typed)
+		}
+		if model.screen == screenControlApplyConfirm || model.screen == screenControlAttestConfirm ||
+			model.screen == screenControlApplyDone || model.screen == screenControlAttestDone {
+			return model.updateControlRemote(typed)
 		}
 		if model.screen == screenControlBind {
 			return model.updateControlBind(typed)
@@ -215,9 +407,15 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.bindPlan = nil
 				model.error = ""
 			case "enter":
+				if model.bindPlan == nil || model.bindPlan.SystemID == "" {
+					return model, nil
+				}
 				model.busy = true
 				model.error = ""
-				return model, bindControlCommand(model.ctx, model.app, model.bindRequest)
+				request := model.bindRequest
+				request.Meta = controlRequestMeta(model.bindPlan.SystemID)
+				ctx := model.beginOperation("Committing Control trust")
+				return model, bindControlCommand(ctx, model.app, request)
 			}
 			return model, nil
 		}
@@ -231,12 +429,13 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.checkPlan = nil
 				model.error = ""
 			case "enter":
-				if model.checkPlan == nil {
+				if model.checkPlan == nil || model.checkPlan.SystemID == "" {
 					return model, nil
 				}
 				model.busy = true
 				model.error = ""
-				return model, checkControlCommand(model.ctx, model.app, model.checkPlan.ControlName)
+				ctx := model.beginOperation("Checking pinned Control connectivity")
+				return model, checkControlCommand(ctx, model.app, model.checkPlan.SystemID, model.checkPlan.ControlName)
 			}
 			return model, nil
 		}
@@ -250,12 +449,13 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.installPlan = nil
 				model.error = ""
 			case "enter":
-				if model.installPlan == nil {
+				if model.installPlan == nil || model.installPlan.SystemID == "" {
 					return model, nil
 				}
 				model.busy = true
 				model.error = ""
-				return model, prepareControlInstallCommand(model.ctx, model.app, model.installPlan.ControlName)
+				ctx := model.beginOperation("Preparing local Control installation")
+				return model, prepareControlInstallCommand(ctx, model.app, model.installPlan.SystemID, model.installPlan.ControlName)
 			}
 			return model, nil
 		}
@@ -268,17 +468,15 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.installDone = nil
 				model.error = ""
 				model.busy = true
-				return model, refreshCommand(model.ctx, model.app)
+				ctx := model.beginOperation("Refreshing dashboard")
+				return model, refreshCommand(ctx, model.app)
 			}
 			return model, nil
 		}
 		if typed.Text != "" {
-			for _, character := range typed.Text {
-				value := string(character)
-				if len([]rune(model.name)) < 64 && systemCharacter.MatchString(value) {
-					model.name += value
-				}
-			}
+			model.name = appendBoundedSafe(model.name, typed.Text, 64, func(character rune) bool {
+				return systemCharacter.MatchString(string(character))
+			})
 			return model, nil
 		}
 		switch key {
@@ -295,7 +493,8 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return model, nil
 			}
 			model.busy, model.error = true, ""
-			return model, initSystemCommand(model.ctx, model.app, model.name)
+			ctx := model.beginOperation("Creating or resuming system")
+			return model, initSystemCommand(ctx, model.app, model.name)
 		}
 	}
 	return model, nil
@@ -330,7 +529,10 @@ func (model model) updateControlBind(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		model.busy = true
 		model.error = ""
-		return model, planControlBindCommand(model.ctx, model.app, model.bindForm.request())
+		request := model.bindForm.request()
+		request.Meta = controlRequestMeta(model.snapshot.ActiveSystemID)
+		ctx := model.beginOperation("Planning local Control trust")
+		return model, planControlBindCommand(ctx, model.app, request)
 	}
 	return model, nil
 }
@@ -353,7 +555,7 @@ func initSystemCommand(ctx context.Context, app *application.Application, name s
 	return func() tea.Msg {
 		result, err := app.InitSystem(ctx, application.InitSystemRequest{
 			Meta: application.RequestMeta{Surface: application.SurfaceTUI}, Name: name, ControlName: "control-1",
-		}, nil)
+		}, operationObserver(ctx))
 		return initSystemMsg{result: result, err: err}
 	}
 }

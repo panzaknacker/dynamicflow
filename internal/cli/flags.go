@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// newCommandFlagSet keeps flag package diagnostics out of JSON output. the
+// newCommandFlagSet keeps flag package diagnostics out of JSON output. The
 // caller emits the one structured usage error after parsing fails.
 func newCommandFlagSet(ctx *commandContext, name string) *flag.FlagSet {
 	set := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -20,9 +20,9 @@ func newCommandFlagSet(ctx *commandContext, name string) *flag.FlagSet {
 }
 
 // parseInterspersed allows documented options on either side of positional
-// operands. the standard flag package stops at the first operand, which makes
+// operands. The standard flag package stops at the first operand, which makes
 // natural commands such as `instance ssh NAME --gui` fail unexpectedly.
-// a literal -- ends option parsing and duplicate options are rejected instead
+// A literal -- ends option parsing and duplicate options are rejected instead
 // of relying on ambiguous last-value-wins behavior.
 func parseInterspersed(set *flag.FlagSet, arguments []string) error {
 	normalized, err := normalizeInterspersed(set, arguments)
@@ -60,7 +60,7 @@ func normalizeInterspersed(set *flag.FlagSet, arguments []string) ([]string, err
 
 		definition := set.Lookup(name)
 		if definition == nil {
-			// preserve flag's conventional help behavior.
+			// Preserve flag's conventional help behavior.
 			if name == "h" || name == "help" {
 				options = append(options, argument)
 				continue
@@ -82,7 +82,7 @@ func normalizeInterspersed(set *flag.FlagSet, arguments []string) ([]string, err
 		options = append(options, arguments[index])
 	}
 
-	// the inserted separator ensures operands beginning with '-' stay operands
+	// The inserted separator ensures operands beginning with '-' stay operands
 	// after options have been moved in front of them.
 	normalized := append(options, "--")
 	return append(normalized, operands...), nil

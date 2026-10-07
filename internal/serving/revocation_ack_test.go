@@ -25,7 +25,7 @@ func TestRevokedIdentityCanSubmitOnlyGenerationBoundFailClosedAck(t *testing.T) 
 	}
 	statusPath := "/v1/instances/vm-01/status"
 
-	// a revocation-shaped report cannot be pre-positioned before the signed
+	// A revocation-shaped report cannot be pre-positioned before the signed
 	// desired state has actually revoked the identity.
 	response := fixture.signedRequest(t, http.MethodPost, statusPath, ackBody,
 		fixture.authorization(t, http.MethodPost, statusPath, ackBody))
@@ -41,7 +41,7 @@ func TestRevokedIdentityCanSubmitOnlyGenerationBoundFailClosedAck(t *testing.T) 
 	}
 	fixture.desired = &revoked
 
-	// a normal ready report from a now-revoked identity is rejected even when
+	// A normal ready report from a now-revoked identity is rejected even when
 	// it is signed with the still-known instance identity.
 	normal := ack
 	normal.State, normal.Revoked, normal.FailClosed = "ready", false, false

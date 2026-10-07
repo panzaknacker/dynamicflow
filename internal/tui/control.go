@@ -54,7 +54,7 @@ func newControlBindForm(name string) controlBindForm {
 func (form controlBindForm) request() application.BindControlRequest {
 	port, err := strconv.Atoi(form.Port)
 	if err != nil {
-		// parsing belongs to this presentation adapter. the Application remains
+		// Parsing belongs to this presentation adapter. The Application remains
 		// authoritative for whether the resulting request is acceptable.
 		port = -1
 	}
@@ -132,8 +132,8 @@ func appendBoundedSafe(current, text string, maximum int, accept func(rune) bool
 	}
 	count := utf8.RuneCountInString(text)
 	if count == 0 || safeview.Text(text, count) != text {
-		// reject the complete paste when it contains terminal controls, newlines,
-		// bidi controls or invalid text. never silently alter trust material.
+		// Reject the complete paste when it contains terminal controls, newlines,
+		// bidi controls or invalid text. Never silently alter trust material.
 		return current
 	}
 	currentRunes := []rune(current)
@@ -274,10 +274,11 @@ type controlInstallMsg struct {
 	err    error
 }
 
-// controlInstallReceipt is the TUI presentation boundary. it intentionally
+// controlInstallReceipt is the TUI presentation boundary. It intentionally
 // drops the Application audit path and never carries private identity paths or
 // canonical envelope bytes.
 type controlInstallReceipt struct {
+	SystemID              string
 	ControlName           string
 	ControlLifecycle      string
 	AccessPhase           string
@@ -295,7 +296,7 @@ type controlInstallReceipt struct {
 
 func newControlInstallReceipt(result application.PrepareControlInstallResult) *controlInstallReceipt {
 	return &controlInstallReceipt{
-		ControlName: result.Control.Name, ControlLifecycle: string(result.Control.Lifecycle),
+		SystemID: result.System.ID, ControlName: result.Control.Name, ControlLifecycle: string(result.Control.Lifecycle),
 		AccessPhase: string(result.Control.Access.Phase), TaskPhase: string(result.Task.Phase),
 		ManagementUser: result.ManagementUser, ManagementPublicKey: result.ManagementPublicKey,
 		ManagementFingerprint: result.ManagementIdentity.Fingerprint,
@@ -304,6 +305,10 @@ func newControlInstallReceipt(result application.PrepareControlInstallResult) *c
 		EnvelopeDigest: result.EnvelopeDigest, NetworkConnections: result.NetworkConnections,
 		Resumed: result.Resumed,
 	}
+}
+
+func controlRequestMeta(systemID string) application.RequestMeta {
+	return application.RequestMeta{Surface: application.SurfaceTUI, ExpectedSystemID: systemID}
 }
 
 func planControlBindCommand(ctx context.Context, app *application.Application, request application.BindControlRequest) tea.Cmd {
@@ -315,47 +320,47 @@ func planControlBindCommand(ctx context.Context, app *application.Application, r
 
 func bindControlCommand(ctx context.Context, app *application.Application, request application.BindControlRequest) tea.Cmd {
 	return func() tea.Msg {
-		result, err := app.BindControl(ctx, request, nil)
+		result, err := app.BindControl(ctx, request, operationObserver(ctx))
 		return controlBindMsg{result: result, err: err}
 	}
 }
 
-func planControlCheckCommand(ctx context.Context, app *application.Application, name string) tea.Cmd {
+func planControlCheckCommand(ctx context.Context, app *application.Application, systemID, name string) tea.Cmd {
 	return func() tea.Msg {
 		plan, err := app.PlanControlCheck(ctx, application.CheckControlRequest{
-			Meta: application.RequestMeta{Surface: application.SurfaceTUI},
+			Meta: controlRequestMeta(systemID),
 			Name: name,
 		})
 		return controlCheckPlanMsg{plan: plan, err: err}
 	}
 }
 
-func checkControlCommand(ctx context.Context, app *application.Application, name string) tea.Cmd {
+func checkControlCommand(ctx context.Context, app *application.Application, systemID, name string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := app.CheckControl(ctx, application.CheckControlRequest{
-			Meta: application.RequestMeta{Surface: application.SurfaceTUI},
+			Meta: controlRequestMeta(systemID),
 			Name: name,
-		}, nil)
+		}, operationObserver(ctx))
 		return controlCheckMsg{result: result, err: err}
 	}
 }
 
-func planControlInstallCommand(ctx context.Context, app *application.Application, name string) tea.Cmd {
+func planControlInstallCommand(ctx context.Context, app *application.Application, systemID, name string) tea.Cmd {
 	return func() tea.Msg {
 		plan, err := app.PlanControlInstall(ctx, application.PrepareControlInstallRequest{
-			Meta: application.RequestMeta{Surface: application.SurfaceTUI},
+			Meta: controlRequestMeta(systemID),
 			Name: name,
 		})
 		return controlInstallPlanMsg{plan: plan, err: err}
 	}
 }
 
-func prepareControlInstallCommand(ctx context.Context, app *application.Application, name string) tea.Cmd {
+func prepareControlInstallCommand(ctx context.Context, app *application.Application, systemID, name string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := app.PrepareControlInstall(ctx, application.PrepareControlInstallRequest{
-			Meta: application.RequestMeta{Surface: application.SurfaceTUI},
+			Meta: controlRequestMeta(systemID),
 			Name: name,
-		}, nil)
+		}, operationObserver(ctx))
 		return controlInstallMsg{result: result, err: err}
 	}
 }

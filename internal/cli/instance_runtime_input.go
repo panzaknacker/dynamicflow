@@ -26,8 +26,8 @@ func openDefaultInstanceRuntimeInput(stdin io.Reader) (instanceRuntimeInput, err
 		if err == nil {
 			return &ttyInstanceRuntimeInput{file: tty, writer: tty, closeFile: true}, nil
 		}
-		// a controlling terminal can be absent in a constrained console even
-		// though stdin itself is a TTY. duplicate the terminal through procfs
+		// A controlling terminal can be absent in a constrained console even
+		// though stdin itself is a TTY. Duplicate the terminal through procfs
 		// so prompts never pollute structured stdout/stderr and Close remains
 		// safe for process stdin.
 		duplicate, duplicateErr := os.OpenFile("/proc/self/fd/0", os.O_RDWR, 0)

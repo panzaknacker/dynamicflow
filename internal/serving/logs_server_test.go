@@ -64,7 +64,7 @@ func TestInstanceLogEndpointAuthenticationReplayBoundsTimeAndBinding(t *testing.
 		})
 	}
 
-	// the finite schema intentionally cannot carry raw stderr/messages.
+	// The finite schema intentionally cannot carry raw stderr/messages.
 	var withMessage map[string]any
 	if err := json.Unmarshal(validBody, &withMessage); err != nil {
 		t.Fatal(err)

@@ -26,7 +26,7 @@ var (
 	ErrInvalidControlRequest  = errors.New("invalid signed control request")
 )
 
-// InstanceRequest signs the exact HTTP intent and body digest. secrets are not
+// InstanceRequest signs the exact HTTP intent and body digest. Secrets are not
 // part of this type, so it is safe for redacted audit metadata.
 type InstanceRequest struct {
 	Schema     int    `json:"schema"`
@@ -43,7 +43,7 @@ type SignedInstanceRequest struct {
 	Signature signing.Signature `json:"signature"`
 }
 
-// ControlRequest authenticates a single operator-to-serving HTTP action. it
+// ControlRequest authenticates a single operator-to-serving HTTP action. It
 // deliberately has a signature domain and trust key distinct from release and
 // desired-state signing, so a deploy/control key cannot forge release content.
 type ControlRequest struct {
@@ -84,7 +84,7 @@ func NewSignedControlRequest(privateKey ed25519.PrivateKey, method, path string,
 }
 
 // NewSignedControlRequestDigest authenticates a pre-hashed streaming body.
-// callers must still compare the received stream with this digest before
+// Callers must still compare the received stream with this digest before
 // committing any mutation.
 func NewSignedControlRequestDigest(privateKey ed25519.PrivateKey, method, path, digest string, now time.Time) (SignedControlRequest, error) {
 	nonce, err := randomToken(32)
@@ -106,7 +106,7 @@ func NewSignedControlRequestDigest(privateKey ed25519.PrivateKey, method, path, 
 }
 
 // VerifyInstanceRequest authenticates the exact request and then durably burns
-// its nonce. replay protection survives serving restarts and concurrent calls.
+// its nonce. Replay protection survives serving restarts and concurrent calls.
 func (store *Store) VerifyInstanceRequest(signed SignedInstanceRequest, publicKey ed25519.PublicKey, expectedInstance, method, path string, body []byte, maxSkew time.Duration) error {
 	if err := validateInstanceRequest(signed.Request); err != nil {
 		return err
@@ -152,7 +152,7 @@ func (store *Store) VerifyInstanceRequest(signed SignedInstanceRequest, publicKe
 			return false, fmt.Errorf("%w: replay cache capacity reached", ErrInvalidStore)
 		}
 		// Timestamp granularity is one second and the accepted freshness
-		// interval is inclusive. retain the nonce through the last second in
+		// interval is inclusive. Retain the nonce through the last second in
 		// which the signed timestamp can still pass verification.
 		state.Nonces[nonceKey] = time.Unix(signed.Request.Timestamp, 0).UTC().Add(maxSkew).Unix()
 		return true, nil
@@ -160,14 +160,14 @@ func (store *Store) VerifyInstanceRequest(signed SignedInstanceRequest, publicKe
 }
 
 // VerifyControlRequest authenticates the exact admin request and durably burns
-// its nonce in the same crash-safe store used by enrollment. it never accepts
+// its nonce in the same crash-safe store used by enrollment. It never accepts
 // bearer credentials or URL secrets.
 func (store *Store) VerifyControlRequest(signed SignedControlRequest, publicKey ed25519.PublicKey, method, path string, body []byte, maxSkew time.Duration) error {
 	return store.VerifyControlRequestDigest(signed, publicKey, method, path, bodyDigest(body), maxSkew)
 }
 
 // VerifyControlRequestDigest verifies and burns a signed streaming request
-// intent before the potentially large body is read. the handler must verify
+// intent before the potentially large body is read. The handler must verify
 // that the complete received body hashes to expectedBodyDigest before commit.
 func (store *Store) VerifyControlRequestDigest(signed SignedControlRequest, publicKey ed25519.PublicKey, method, path, expectedBodyDigest string, maxSkew time.Duration) error {
 	if err := validateControlRequest(signed.Request); err != nil {

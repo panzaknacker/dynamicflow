@@ -46,8 +46,10 @@ printf '\n1/5 — Build the CLI and identify the version\n'
 make build GO="$demo_go"
 flow_demo --version
 
-printf '\n2/5 — Initialize isolated local state and check prerequisites\n'
-flow_demo init
+printf '\n2/5 — Plan and initialize a disposable local system\n'
+flow_demo system init --name portfolio --control-name control-1 --plan
+flow_demo system init --name portfolio --control-name control-1
+flow_demo system status
 flow_demo doctor
 
 printf '\n3/5 — Inspect available profiles and the PBP dependency graph\n'

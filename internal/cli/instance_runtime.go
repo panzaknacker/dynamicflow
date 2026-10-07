@@ -111,7 +111,7 @@ type instanceRuntimeEnrollOptions struct {
 	requestTimeout time.Duration
 }
 
-// instanceRuntimeConfig contains public trust and binding data only. in
+// instanceRuntimeConfig contains public trust and binding data only. In
 // particular, enrollment ID and secret have no fields and cannot be encoded.
 type instanceRuntimeConfig struct {
 	Schema           int    `json:"schema"`
@@ -165,7 +165,10 @@ type deferredRuntimeSecret struct {
 }
 
 func commandInstanceRuntimeRaw(arguments []string, stdout, stderr io.Writer, jsonOutput bool) int {
-	command := requestedCommandID(append([]string{"instance-runtime"}, arguments...))
+	command := "instance-runtime"
+	if len(arguments) != 0 {
+		command += "." + arguments[0]
+	}
 	out := &emitter{json: jsonOutput, stdout: stdout, stderr: stderr, command: command}
 	return runInstanceRuntime(arguments, out, defaultInstanceRuntimeDependencies())
 }
@@ -215,7 +218,7 @@ func runInstanceRuntime(arguments []string, out *emitter, deps instanceRuntimeDe
 }
 
 func commandInstanceRuntimeSecret(arguments []string, out *emitter, deps instanceRuntimeDependencies) int {
-	// accept exactly the fixed argv emitted by flow instance secret. there are
+	// Accept exactly the fixed argv emitted by flow instance secret. There are
 	// no paths, usernames, units, credentials, or general commands to vary.
 	if len(arguments) != 3 || (arguments[0] != "reveal" && arguments[0] != "rotate") || arguments[1] != "--secret" || arguments[2] != "vnc" {
 		return out.fail("usage", "invalid fixed VNC credential operation", "Use flow instance secret reveal|rotate NAME --secret vnc from the operator machine.", exitUsage)
@@ -241,8 +244,8 @@ func commandInstanceRuntimeSecret(arguments []string, out *emitter, deps instanc
 	if !validRuntimeVNCSecret(value) {
 		return out.fail("vnc_secret", "target VNC credential result failed validation", "Repair the managed VNC credential state.", exitVerify)
 	}
-	// this raw, single-line stdout is the deliberate secret channel consumed by
-	// the operator CLI. never route it through structured logs or error text.
+	// This raw, single-line stdout is the deliberate secret channel consumed by
+	// the operator CLI. Never route it through structured logs or error text.
 	if _, err := fmt.Fprintf(out.stdout, "%s\n", value); err != nil {
 		return exitFailure
 	}
@@ -277,7 +280,7 @@ func commandInstanceRuntimeEnroll(arguments []string, out *emitter, deps instanc
 		return failInstanceRuntime(out, err)
 	}
 	// Install and enable the fixed pull-only timer before any enrollment
-	// credential is opened or consumed. the service itself is guarded by the
+	// credential is opened or consumed. The service itself is guarded by the
 	// atomically persisted runtime-config.json, so an interrupted enrollment is
 	// inert while an interrupted apply is resumed after reboot or the next tick.
 	if deps.installTimer == nil {
@@ -389,7 +392,7 @@ func commandInstanceRuntimeReconcile(arguments []string, out *emitter, deps inst
 		return failInstanceRuntime(out, err)
 	}
 	if deps.bridgePBPLogs != nil && !result.Desired.State.Revoked {
-		// local PBP diagnostics are best-effort telemetry. an unavailable or
+		// Local PBP diagnostics are best-effort telemetry. An unavailable or
 		// unsafe source must never block desired-state reconciliation.
 		_ = deps.bridgePBPLogs(context.Background(), config, client, deps.now)
 	}
@@ -1005,7 +1008,7 @@ func (reporter *instanceRuntimeReporter) afterHandoff(ctx context.Context) {
 		component.State, component.Code = "ready", ""
 		reporter.components["flow"] = component
 	}
-	// the previous apply generation remains authoritative until the new binary
+	// The previous apply generation remains authoritative until the new binary
 	// finishes the complete plan on the next timer invocation.
 	reporter.record(reporter.reportStatus(ctx, "applying", reporter.checkpoint.DesiredGeneration, false))
 }

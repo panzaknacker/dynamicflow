@@ -16,7 +16,7 @@ import (
 var auditTokenRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 // AuditEvent has no free-form body, URL, enrollment ID, secret, key or error
-// text fields. this keeps the audit contract useful without becoming a secret
+// text fields. This keeps the audit contract useful without becoming a secret
 // exfiltration surface.
 type AuditEvent struct {
 	Timestamp int64  `json:"timestamp"`

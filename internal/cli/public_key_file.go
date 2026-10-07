@@ -15,7 +15,7 @@ var (
 )
 
 // readBoundedPublicKeyFile reads a small public key without accepting a
-// symlink or a path that changed identity between inspection and opening. it
+// symlink or a path that changed identity between inspection and opening. It
 // returns bytes only after the opened descriptor has been matched back to the
 // original regular file.
 func readBoundedPublicKeyFile(path string) ([]byte, error) {

@@ -8,10 +8,10 @@ import (
 	"dynamicflow/internal/application"
 )
 
-const controlInstallUsage = "usage: flow control install NAME [--plan]"
+const controlInstallUsage = "usage: flow control install NAME [--plan] [--expect-system SYS_ID]"
 
 // controlInstallPlanOutput is a presentation boundary, not an alias for the
-// application result. keeping it explicit prevents future private checkpoint
+// Application result. Keeping it explicit prevents future private checkpoint
 // paths or envelope bytes from silently becoming part of the CLI contract.
 type controlInstallPlanOutput struct {
 	Plan                        bool     `json:"plan"`
@@ -32,7 +32,7 @@ type controlInstallPlanOutput struct {
 }
 
 // controlInstallOutput deliberately contains the one public management key
-// which the operator must be able to inspect. it excludes AuditLog, local key
+// which the operator must be able to inspect. It excludes AuditLog, local key
 // paths, canonical envelope bytes and every private-key field.
 type controlInstallOutput struct {
 	Prepared                    bool   `json:"prepared"`
@@ -61,6 +61,7 @@ type controlInstallOutput struct {
 
 func controlInstall(ctx *commandContext, args []string) int {
 	flags := newCommandFlagSet(ctx, "control install")
+	meta := registerControlSystemExpectation(flags)
 	planOnly := flags.Bool("plan", false, "preview the local route-free preparation without mutation")
 	if err := parseInterspersed(flags, args); err != nil || flags.NArg() != 1 {
 		return usage(ctx, controlInstallUsage)
@@ -70,7 +71,7 @@ func controlInstall(ctx *commandContext, args []string) int {
 		return ctx.out.fail("system_state", err.Error(), "Repair FLOW_HOME ownership, mode or registry state.", exitConfig)
 	}
 	request := application.PrepareControlInstallRequest{
-		Meta: application.RequestMeta{Surface: application.SurfaceCLI},
+		Meta: *meta,
 		Name: flags.Arg(0),
 	}
 	if *planOnly {
@@ -107,7 +108,9 @@ func controlInstall(ctx *commandContext, args []string) int {
 	observer := application.ObserverFunc(func(event application.Event) {
 		ctx.out.phase(event.Phase, event.Status, event.Detail)
 	})
-	result, err := app.PrepareControlInstall(context.Background(), request, observer)
+	operation, stop := commandOperationContext()
+	defer stop()
+	result, err := app.PrepareControlInstall(operation, request, observer)
 	if err != nil {
 		return emitApplicationError(ctx, err)
 	}
@@ -137,7 +140,7 @@ func controlInstall(ctx *commandContext, args []string) int {
 			"Signed policy: generation %d, key %s\nEnvelope digest: %s\n"+
 			"Routes authorized: %d (route-free)\nNetwork connections: %d\n"+
 			"REMOTE INSTALLATION PERFORMED: NO\nCONTROL READY: NO\n"+
-			"Next: run the separate fixed, pinned remote installation step when it is available.",
+			"Next: inspect flow control apply NAME --plan, then run flow control apply NAME for this Control.",
 		mode, output.ControlName, output.ControlLifecycle, output.AccessPhase, output.TaskPhase,
 		output.ManagementUser, output.ManagementPublicKey, output.ManagementFingerprint,
 		output.ManagementGeneration, output.PolicyGeneration, output.PolicyKeyID,

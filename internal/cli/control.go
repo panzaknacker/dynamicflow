@@ -11,11 +11,11 @@ import (
 	"dynamicflow/internal/controlnodes"
 )
 
-const controlBindUsage = "usage: flow control bind NAME --host HOST --ssh-user USER --os debian-13|ubuntu-24.04 --hostkey-file ABS --evidence provider-console|provider-attestation [--ssh-port PORT] [--plan]"
+const controlBindUsage = "usage: flow control bind NAME --host HOST --ssh-user USER --os debian-13|ubuntu-24.04 --hostkey-file ABS --evidence provider-console|provider-attestation [--ssh-port PORT] [--plan] [--expect-system SYS_ID]"
 
 func commandControl(ctx *commandContext, args []string) int {
 	if len(args) == 0 {
-		return usage(ctx, "usage: flow control <bind|check|install|apply|status>")
+		return usage(ctx, "usage: flow control <bind|check|install|apply|attest|status>")
 	}
 	switch args[0] {
 	case "bind":
@@ -26,6 +26,8 @@ func commandControl(ctx *commandContext, args []string) int {
 		return controlInstall(ctx, args[1:])
 	case "apply":
 		return controlApply(ctx, args[1:])
+	case "attest":
+		return controlAttest(ctx, args[1:])
 	case "status":
 		return controlStatus(ctx, args[1:])
 	default:
@@ -35,6 +37,7 @@ func commandControl(ctx *commandContext, args []string) int {
 
 func controlBind(ctx *commandContext, args []string) int {
 	flags := newCommandFlagSet(ctx, "control bind")
+	meta := registerControlSystemExpectation(flags)
 	host := flags.String("host", "", "operator-reachable Control hostname or IP")
 	sshUser := flags.String("ssh-user", "", "non-root SSH user")
 	operatingSystem := flags.String("os", "", "Control base operating system")
@@ -65,7 +68,7 @@ func controlBind(ctx *commandContext, args []string) int {
 		return ctx.out.fail("system_state", err.Error(), "Repair FLOW_HOME ownership, mode or registry state.", exitConfig)
 	}
 	request := application.BindControlRequest{
-		Meta: application.RequestMeta{Surface: application.SurfaceCLI}, Name: flags.Arg(0),
+		Meta: *meta, Name: flags.Arg(0),
 		Host: *host, Port: *sshPort, SSHUser: *sshUser,
 		OperatingSystem: controlnodes.OperatingSystem(*operatingSystem), HostPublicKey: string(publicKey),
 		EvidenceSource: controlnodes.EvidenceSource(*evidence),
@@ -88,7 +91,9 @@ func controlBind(ctx *commandContext, args []string) int {
 	observer := application.ObserverFunc(func(event application.Event) {
 		ctx.out.phase(event.Phase, event.Status, event.Detail)
 	})
-	result, err := app.BindControl(context.Background(), request, observer)
+	operation, stop := commandOperationContext()
+	defer stop()
+	result, err := app.BindControl(operation, request, observer)
 	if err != nil {
 		return emitApplicationError(ctx, err)
 	}

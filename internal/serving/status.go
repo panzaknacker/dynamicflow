@@ -144,7 +144,7 @@ func ValidateStatus(report StatusReport) error {
 }
 
 // IsRevocationAcknowledgement recognizes the only status a revoked instance
-// identity may submit. it is deliberately exact and contains no free-form
+// identity may submit. It is deliberately exact and contains no free-form
 // diagnostics or host key: the identity can acknowledge only that its fixed
 // local SSH fail-closed action succeeded.
 func IsRevocationAcknowledgement(report StatusReport) bool {

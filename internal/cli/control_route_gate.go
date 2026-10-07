@@ -13,13 +13,13 @@ const (
 )
 
 // operatorActionNeedsControlRoute is the temporary public-surface enforcement
-// boundary while the corresponding signed via-control transports are being
-// implemented. it deliberately depends only on argv: operator state,
+// boundary while the corresponding signed via-Control transports are being
+// implemented. It deliberately depends only on argv: operator state,
 // environment variables and legacy endpoint configuration cannot enable a
 // direct fallback.
-
-// raw serving/instance/control runtime entry points are dispatched before this
-// gate and are not operator lifecycle commands. the first control bootstrap
+//
+// Raw serving/instance/control runtime entry points are dispatched before this
+// gate and are not operator lifecycle commands. The first Control bootstrap
 // remains available through the dedicated control command group.
 func operatorActionNeedsControlRoute(arguments []string) bool {
 	if len(arguments) < 2 {
@@ -43,14 +43,14 @@ func operatorActionNeedsControlRoute(arguments []string) bool {
 			return len(arguments) >= 3 && arguments[2] == "finalize"
 		}
 	case "release":
-		// publishing is local only when the caller supplies an unambiguous,
-		// absolute, non-root destination. an omitted destination historically
+		// Publishing is local only when the caller supplies an unambiguous,
+		// absolute, non-root destination. An omitted destination historically
 		// selected remote serving from mutable local state, so ambiguity must
-		// fail closed. this includes remote --plan.
+		// fail closed. This includes remote --plan.
 		return arguments[1] == "publish" && !explicitLocalReleasePublish(arguments[2:])
 	case "test":
-		// the lab plan parses private local inventory and pinned metadata only.
-		// every non-plan lab invocation can start SSH and is therefore gated.
+		// The lab plan parses private local inventory and pinned metadata only.
+		// Every non-plan lab invocation can start SSH and is therefore gated.
 		return arguments[1] == "lab" && !explicitReadOnlyPlan(arguments[2:])
 	}
 	return false

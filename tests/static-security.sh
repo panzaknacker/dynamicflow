@@ -76,6 +76,16 @@ fi
 
 help_output="$($flow_bin --help)"
 required_help=(
+    'flow system init --name NAME'
+    'flow system select NAME_OR_ID'
+    'flow system status'
+    'flow control bind NAME --host HOST --ssh-user USER'
+    'flow control check NAME [--plan]'
+    'flow control install NAME [--plan]'
+    'flow control apply NAME [--plan]'
+    'flow control attest NAME [--plan]'
+    'flow control status'
+    'flow dashboard'
     'flow init'
     'flow doctor'
     'flow start serving [--plan]'
@@ -105,6 +115,7 @@ done
 [[ "$help_output" == *'Global options are recognized anywhere before a literal -- separator.'* ]] ||
     fail 'global option/remote-command separator semantics are missing from help'
 [[ "$help_output" != *'flow instance-runtime'* ]] || fail 'internal runtime leaked into operator help'
+[[ "$help_output" != *'flow control-runtime'* ]] || fail 'internal Control runtime leaked into operator help'
 [[ "$help_output" != *'flow serve '* ]] || fail 'internal serving runtime leaked into operator help'
 
 extract_function() {

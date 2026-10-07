@@ -25,11 +25,11 @@ const (
 var (
 	// ErrSessionDenied is the only public result for an invalid forced-command
 	// request, execution identity, SSH transport context or state-root binding.
-	// it deliberately carries no rejected input or underlying error.
+	// It deliberately carries no rejected input or underlying error.
 	ErrSessionDenied = errors.New("Control session denied")
 
 	// ErrSessionUnavailable is the only public result for unreadable, unsafe,
-	// invalid, expired or unauthentic active Control state. it deliberately
+	// invalid, expired or unauthentic active Control state. It deliberately
 	// does not distinguish filesystem failures from signature failures.
 	ErrSessionUnavailable = errors.New("Control attestation unavailable")
 
@@ -39,13 +39,13 @@ var (
 )
 
 // SessionConfig binds the ForceCommand handler to one exact canonical state
-// root. production uses DefaultStateRoot; tests may bind an isolated fixture.
+// root. Production uses DefaultStateRoot; tests may bind an isolated fixture.
 type SessionConfig struct {
 	StateRoot string
 }
 
 // SessionRequest represents the fixed --state-root value passed by the
-// installer-owned ForceCommand. all attestation fields come exclusively from
+// installer-owned ForceCommand. All attestation fields come exclusively from
 // SSH_ORIGINAL_COMMAND and cannot be supplied through this API.
 type SessionRequest struct {
 	StateRoot string
@@ -60,8 +60,8 @@ type SessionIdentity struct {
 }
 
 // SessionDependencies are narrow read-only seams for deterministic tests.
-// production implementations read two SSH environment variables, the local
-// account database and one protected envelope file. there is deliberately no
+// Production implementations read two SSH environment variables, the local
+// account database and one protected envelope file. There is deliberately no
 // process runner, shell, network client or write callback.
 type SessionDependencies struct {
 	LookupEnvironment  func(string) (string, bool)
@@ -70,7 +70,7 @@ type SessionDependencies struct {
 	Now                func() time.Time
 }
 
-// SessionResponse is the complete public attestation response. it contains no
+// SessionResponse is the complete public attestation response. It contains no
 // route, key, address, path, command, environment or error-detail field.
 type SessionResponse struct {
 	Schema         int       `json:"schema"`
@@ -103,8 +103,8 @@ func NewSession() *Session {
 		defaultSessionDependencies(),
 	)
 	if err != nil {
-		// the production configuration consists exclusively of compile-time
-		// constants and package-owned functions. keep callers free from a
+		// The production configuration consists exclusively of compile-time
+		// constants and package-owned functions. Keep callers free from a
 		// constructor error that can never be actionable at runtime.
 		return nil
 	}
@@ -112,7 +112,7 @@ func NewSession() *Session {
 }
 
 // NewSessionWithDependencies constructs a session with read-only injectable
-// dependencies. the configured root remains immutable for the Session's
+// dependencies. The configured root remains immutable for the Session's
 // lifetime and every Execute request must match it byte-for-byte.
 func NewSessionWithDependencies(configuration SessionConfig, dependencies SessionDependencies) (*Session, error) {
 	if !safeAbsolutePath(configuration.StateRoot) ||
@@ -129,7 +129,7 @@ func NewSessionWithDependencies(configuration SessionConfig, dependencies Sessio
 }
 
 // Execute authenticates one exact attestation request and returns canonical
-// JSON. it performs no mutation, process execution or network access. on any
+// JSON. It performs no mutation, process execution or network access. On any
 // failure it returns no response bytes and one fixed public error.
 func (session *Session) Execute(ctx context.Context, request SessionRequest) ([]byte, error) {
 	if session == nil || ctx == nil || session.dependencies.LookupEnvironment == nil ||

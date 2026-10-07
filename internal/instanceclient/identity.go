@@ -57,7 +57,7 @@ func ensureIdentity(store *localstate.Store, allowGenerate bool) (identity, erro
 				return fmt.Errorf("generate instance identity: %w", err)
 			}
 		} else if !publicExists {
-			// GenerateFiles writes the private key first. if the process died in
+			// GenerateFiles writes the private key first. If the process died in
 			// that narrow window, recover the public half from the same private
 			// identity instead of replacing the persona.
 			if err := recoverPublicIdentity(privatePath, publicPath); err != nil {

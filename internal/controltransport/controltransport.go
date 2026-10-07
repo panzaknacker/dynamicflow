@@ -1,9 +1,10 @@
-// package controltransport owns the process boundary for the one-time direct
-// connectivity check of the first dynamicflow control node.
+// Package controltransport owns the process boundary for the one-time direct
+// connectivity check of the first Dynamicflow control node.
 package controltransport
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"io"
 	"os/exec"
@@ -16,7 +17,7 @@ const (
 	// FirstControlCheckTimeout bounds the single SSH process attempt.
 	FirstControlCheckTimeout = 45 * time.Second
 	// MaxOutputBytes is the maximum amount reported independently for stdout
-	// and stderr. output contents are always discarded.
+	// and stderr. Output contents are always discarded.
 	MaxOutputBytes int64 = 64 << 10
 )
 
@@ -39,7 +40,7 @@ func (DefaultRunner) Run(ctx context.Context, argv []string, stdin io.Reader, st
 	return command.Run()
 }
 
-// Result contains only safe metadata about one direct first-control check. it
+// Result contains only safe metadata about one direct first-control check. It
 // deliberately excludes endpoint addresses, argv, raw output and key paths.
 type Result struct {
 	FirstHopAlias   string `json:"first_hop_alias"`
@@ -52,24 +53,50 @@ type Result struct {
 }
 
 // Transport performs only the direct connectivity check for the first
-// control. routed targets and arbitrary commands intentionally have no API in
+// control. Routed targets and arbitrary commands intentionally have no API in
 // this package.
 type Transport struct {
 	builder *sshtransport.Builder
 	runner  Runner
+	now     func() time.Time
+	random  io.Reader
 }
 
-// New constructs a Transport. a nil runner selects DefaultRunner.
-func New(builder *sshtransport.Builder, runner Runner) *Transport {
+type Option func(*Transport)
+
+func WithClock(clock func() time.Time) Option {
+	return func(transport *Transport) {
+		if clock != nil {
+			transport.now = clock
+		}
+	}
+}
+
+func WithRandomReader(reader io.Reader) Option {
+	return func(transport *Transport) {
+		if reader != nil {
+			transport.random = reader
+		}
+	}
+}
+
+// New constructs a Transport. A nil runner selects DefaultRunner.
+func New(builder *sshtransport.Builder, runner Runner, options ...Option) *Transport {
 	if runner == nil {
 		runner = DefaultRunner{}
 	}
-	return &Transport{builder: builder, runner: runner}
+	transport := &Transport{builder: builder, runner: runner, now: time.Now, random: rand.Reader}
+	for _, option := range options {
+		if option != nil {
+			option(transport)
+		}
+	}
+	return transport
 }
 
 // CheckFirstControl makes exactly one bounded SSH attempt using the sole
-// direct capability and the fixed remote command /bin/true. it performs no
-// retry or fallback. errors never expose builder, runner or remote details.
+// direct capability and the fixed remote command /bin/true. It performs no
+// retry or fallback. Errors never expose builder, runner or remote details.
 func (transport *Transport) CheckFirstControl(ctx context.Context, control sshtransport.Endpoint) (Result, error) {
 	result := Result{
 		Route:    "direct_first_control",
@@ -77,6 +104,9 @@ func (transport *Transport) CheckFirstControl(ctx context.Context, control sshtr
 	}
 	if transport == nil || transport.builder == nil || transport.runner == nil || ctx == nil {
 		return result, ErrFirstControlCheck
+	}
+	if err := ctx.Err(); err != nil {
+		return result, safeCheckError(err, nil)
 	}
 
 	invocation, err := transport.builder.BuildDirectFirstControl(
@@ -86,7 +116,7 @@ func (transport *Transport) CheckFirstControl(ctx context.Context, control sshtr
 	if err != nil {
 		return result, ErrFirstControlCheck
 	}
-	// the builder has now validated the endpoint's strict public alias grammar.
+	// The builder has now validated the endpoint's strict public alias grammar.
 	result.FirstHopAlias = control.Alias
 	argv := append(invocation.Arguments(), "/bin/true")
 	stdout := boundedOutput{limit: MaxOutputBytes}
@@ -94,11 +124,14 @@ func (transport *Transport) CheckFirstControl(ctx context.Context, control sshtr
 
 	operation, cancel := context.WithTimeout(ctx, FirstControlCheckTimeout)
 	defer cancel()
+	if err := operation.Err(); err != nil {
+		return result, safeCheckError(err, nil)
+	}
 	result.Attempts = 1
 	err = transport.runner.Run(operation, argv, nil, &stdout, &stderr)
 	result.StdoutBytes, result.StderrBytes = stdout.kept, stderr.kept
 	result.StdoutTruncated, result.StderrTruncated = stdout.truncated, stderr.truncated
-	if err != nil {
+	if err != nil || operation.Err() != nil {
 		return result, safeCheckError(operation.Err(), err)
 	}
 	return result, nil

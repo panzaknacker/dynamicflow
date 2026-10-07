@@ -18,11 +18,17 @@ const controlRuntimeHelpText = `Dynamicflow Control runtime (internal Linux root
 Usage:
   flow control-runtime install --expected-system SYSTEM_ID \
     --expected-control CONTROL_NAME --minimum-generation GENERATION
+  flow control-runtime session --state-root /var/lib/dynamicflow/control
 
 The canonical, signed Control installation envelope is read exclusively from
 stdin. This command accepts no paths, credentials, private keys, environment
 configuration, positional operands, or arbitrary commands. It is invoked by
 the fixed, pinned first-Control bootstrap transport.
+
+Session is the installer-owned sshd ForceCommand. It accepts only the fixed
+state root and a bounded attestation request from SSH_ORIGINAL_COMMAND, verifies
+the unprivileged management identity and signed active policy, and emits one
+canonical public JSON response. It never opens operator state or reads stdin.
 `
 
 type controlRuntimeInstaller interface {
@@ -31,6 +37,11 @@ type controlRuntimeInstaller interface {
 
 type controlRuntimeDependencies struct {
 	newInstaller func() controlRuntimeInstaller
+	newSession   func() controlRuntimeSession
+}
+
+type controlRuntimeSession interface {
+	Execute(context.Context, controlruntime.SessionRequest) ([]byte, error)
 }
 
 type controlRuntimeInstallOutput struct {
@@ -46,8 +57,8 @@ type controlRuntimeInstallOutput struct {
 
 func commandControlRuntimeRaw(arguments []string, stdin io.Reader, stdout, stderr io.Writer, jsonOutput bool) int {
 	command := "control-runtime"
-	if len(arguments) > 0 && arguments[0] == "install" {
-		command = "control-runtime.install"
+	if len(arguments) > 0 && (arguments[0] == "install" || arguments[0] == "session") {
+		command += "." + arguments[0]
 	}
 	out := &emitter{json: jsonOutput, stdout: stdout, stderr: stderr, command: command}
 	return runControlRuntime(arguments, stdin, out, defaultControlRuntimeDependencies())
@@ -58,6 +69,9 @@ func defaultControlRuntimeDependencies() controlRuntimeDependencies {
 		newInstaller: func() controlRuntimeInstaller {
 			return controlruntime.NewInstaller()
 		},
+		newSession: func() controlRuntimeSession {
+			return controlruntime.NewSession()
+		},
 	}
 }
 
@@ -66,7 +80,7 @@ func runControlRuntime(arguments []string, stdin io.Reader, out *emitter, depend
 		return exitFailure
 	}
 	if len(arguments) == 0 {
-		return out.fail("usage", "control-runtime requires the fixed install operation", "Run flow control-runtime --help.", exitUsage)
+		return out.fail("usage", "control-runtime requires a fixed install or session operation", "Run flow control-runtime --help.", exitUsage)
 	}
 	if isRuntimeHelp(arguments[0]) {
 		if out.json {
@@ -74,6 +88,9 @@ func runControlRuntime(arguments []string, stdin io.Reader, out *emitter, depend
 		}
 		fmt.Fprint(out.stdout, controlRuntimeHelpText)
 		return exitOK
+	}
+	if arguments[0] == "session" {
+		return runControlRuntimeSession(arguments[1:], out, dependencies)
 	}
 	if arguments[0] != "install" {
 		return out.fail("usage", "unknown control-runtime operation", "Run flow control-runtime --help.", exitUsage)
@@ -104,7 +121,9 @@ func runControlRuntime(arguments []string, stdin io.Reader, out *emitter, depend
 			exitConfig,
 		)
 	}
-	result, err := installer.Install(context.Background(), stdin, request)
+	operation, stop := commandOperationContext()
+	defer stop()
+	result, err := installer.Install(operation, stdin, request)
 	if err != nil {
 		return failControlRuntimeInstall(out, err)
 	}
@@ -126,6 +145,44 @@ func runControlRuntime(arguments []string, stdin io.Reader, out *emitter, depend
 		output.ControlName, output.SystemID, output.Generation, output.Changed,
 	)
 	return out.success("control-runtime.install", output, human)
+}
+
+func runControlRuntimeSession(arguments []string, out *emitter, dependencies controlRuntimeDependencies) int {
+	// Deliberately do not use flag parsing: alternate spellings, extra values
+	// and global JSON envelopes are not part of the forced-command protocol.
+	if out.json || len(arguments) != 2 || arguments[0] != "--state-root" || arguments[1] != controlruntime.DefaultStateRoot {
+		fmt.Fprintln(out.stderr, controlruntime.ErrSessionDenied)
+		return exitUsage
+	}
+	if dependencies.newSession == nil {
+		fmt.Fprintln(out.stderr, controlruntime.ErrSessionUnavailable)
+		return exitConfig
+	}
+	session := dependencies.newSession()
+	if session == nil {
+		fmt.Fprintln(out.stderr, controlruntime.ErrSessionUnavailable)
+		return exitConfig
+	}
+	operation, stop := commandOperationContext()
+	defer stop()
+	response, err := session.Execute(operation, controlruntime.SessionRequest{StateRoot: arguments[1]})
+	if err != nil {
+		if errors.Is(err, controlruntime.ErrSessionDenied) {
+			fmt.Fprintln(out.stderr, controlruntime.ErrSessionDenied)
+			return exitAuth
+		}
+		fmt.Fprintln(out.stderr, controlruntime.ErrSessionUnavailable)
+		return exitFailure
+	}
+	if len(response) == 0 || len(response) > controlruntime.MaxSessionResponseBytes {
+		fmt.Fprintln(out.stderr, controlruntime.ErrSessionUnavailable)
+		return exitFailure
+	}
+	if count, err := out.stdout.Write(response); err != nil || count != len(response) {
+		fmt.Fprintln(out.stderr, controlruntime.ErrSessionUnavailable)
+		return exitFailure
+	}
+	return exitOK
 }
 
 func parseControlRuntimeInstallArguments(arguments []string) (controlruntime.InstallRequest, error) {
@@ -217,6 +274,20 @@ func validControlRuntimeDigest(value string) bool {
 
 func failControlRuntimeInstall(out *emitter, err error) int {
 	switch {
+	case errors.Is(err, controlruntime.ErrInstallRollback):
+		return out.fail(
+			"control_recovery_required",
+			"Control runtime rollback could not be proven",
+			"Do not retry over SSH; recover and verify the host through the provider console.",
+			exitPartial,
+		)
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return out.fail(
+			"control_install_interrupted",
+			"Control runtime installation was interrupted",
+			"Treat Control as inactive, inspect the host through the provider console if needed, then retry the same fixed operation.",
+			exitPartial,
+		)
 	case errors.Is(err, controlruntime.ErrRootRequired):
 		return out.fail(
 			"privilege",
@@ -273,20 +344,6 @@ func failControlRuntimeInstall(out *emitter, err error) int {
 			"Control SSH policy reload failed and the previous state was restored",
 			"Keep Control inactive, inspect the sanitized system journal through the provider console, and retry after repair.",
 			exitFailure,
-		)
-	case errors.Is(err, controlruntime.ErrInstallRollback):
-		return out.fail(
-			"control_recovery_required",
-			"Control runtime rollback could not be proven",
-			"Do not retry over SSH; recover and verify the host through the provider console.",
-			exitPartial,
-		)
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return out.fail(
-			"control_install_interrupted",
-			"Control runtime installation was interrupted",
-			"Treat Control as inactive, inspect the host through the provider console if needed, then retry the same fixed operation.",
-			exitPartial,
 		)
 	default:
 		return out.fail(

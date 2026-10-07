@@ -18,13 +18,13 @@ const immutableReleasePathPrefix = "/v1/releases/sets/"
 
 var ErrArtifactNotBound = errors.New("artifact is not bound to the verified release manifest")
 
-// DownloadArtifact streams one immutable artifact into destination. the caller
+// DownloadArtifact streams one immutable artifact into destination. The caller
 // must provide the exact component from signed; accepting a bare URL or logical
 // path here would turn the pinned HTTPS client into a confused deputy.
-
-// the release signature, exact component binding, response size, and SHA-256
+//
+// The release signature, exact component binding, response size, and SHA-256
 // digest are all verified. destination may therefore contain incomplete or
-// rejected bytes when this method returns an error. callers that write durable
+// rejected bytes when this method returns an error. Callers that write durable
 // files must write to a private temporary file and activate it only after a nil
 // result. DownloadArtifact never closes, truncates, renames, or removes caller
 // resources.
@@ -64,8 +64,8 @@ func (client *Client) DownloadArtifact(
 	if err != nil {
 		return fmt.Errorf("create artifact request: %w", err)
 	}
-	// this endpoint is public after TLS and release-signature verification. Do
-	// not attach the instance authorization header (or any enrollment material).
+	// This endpoint is public after TLS and release-signature verification. Do
+	// not attach the instance Authorization header (or any enrollment material).
 	request.Header.Set("Accept", "application/octet-stream")
 	request.Header.Set("Cache-Control", "no-store")
 	request.Header.Set("User-Agent", "dynamicflow-instance/1")
@@ -176,7 +176,7 @@ func boundedArtifactHTTPError(response *http.Response) error {
 }
 
 // artifactDestination records whether io.CopyN stopped because the caller's
-// writer failed. this preserves that error instead of misclassifying it as a
+// writer failed. This preserves that error instead of misclassifying it as a
 // truncated network response.
 type artifactDestination struct {
 	writer io.Writer
